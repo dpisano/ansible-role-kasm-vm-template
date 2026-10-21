@@ -1,0 +1,123 @@
+---
+# Kasm VM templates to build. A template is built once; if the VMID is already
+# a template it is skipped. Keys (anything left out comes from
+# kasm_template_defaults):
+#   name, vmid, os        required; os is a key of kasm_template_os
+#   kind                  agent (Docker host for Kasm autoscaling) or
+#                         desktop (full-VM desktop with RDP, for Kasm servers)
+#   cores, memory (MiB), disk (GiB), storage, bridge, vlan
+kasm_templates: []
+
+kasm_template_defaults:
+  kind: agent
+  cores: 4
+  memory: 4096
+  disk: 40
+  storage: local-lvm
+  bridge: vmbr0
+  vlan: ""
+
+# Rebuild a VMID that already exists as a template: destroys it first.
+kasm_template_rebuild: false
+
+# Public key authorized on the build VM; the controller must hold the private
+# half. The key stays in the template, so clones accept it too.
+kasm_template_ssh_public_key: "{{ users[0].ssh_key }}"
+
+# Proxmox storage holding cloud images (directory) and cloud-init snippets.
+kasm_template_image_dir: /var/lib/vz/template/iso/cloud-init
+kasm_template_snippets_storage: local
+kasm_template_snippets_dir: /var/lib/vz/snippets
+
+# How long to wait for the guest agent to report an address, and for SSH.
+kasm_template_boot_retries: 60
+kasm_template_boot_delay: 5
+
+# Docker images to pre-pull into agent templates, e.g. kasmweb/chrome:1.18.0.
+kasm_template_prepull_images: []
+
+# Cloud images. family picks the package-manager tasks (debian or arch); user
+# is the image's default login; agent_install runs from cloud-init on first
+# boot so the guest agent is up before Ansible connects.
+kasm_template_os:
+  ubuntu-2404:
+    family: debian
+    user: ubuntu
+    url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+    file: ubuntu-2404-cloudimg-amd64.qcow2
+    agent_install: apt-get install -y qemu-guest-agent
+  ubuntu-2204:
+    family: debian
+    user: ubuntu
+    url: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+    file: ubuntu-2204-cloudimg-amd64.qcow2
+    agent_install: apt-get install -y qemu-guest-agent
+  debian-12:
+    family: debian
+    user: debian
+    url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+    file: debian-12-genericcloud-amd64.qcow2
+    agent_install: apt-get install -y qemu-guest-agent
+  debian-13:
+    family: debian
+    user: debian
+    url: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+    file: debian-13-genericcloud-amd64.qcow2
+    agent_install: apt-get install -y qemu-guest-agent
+  # Omarchy has no cloud image: it is installed unattended from its ISO. See
+  # the README. desktop only (wayvnc, for a Kasm VNC server connection).
+  omarchy:
+    method: iso
+    family: arch
+    user: "{{ kasm_omarchy_username }}"
+  arch:
+    family: arch
+    user: arch
+    url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
+    file: arch-cloudimg-x86_64.qcow2
+    agent_install: pacman -Sy --noconfirm qemu-guest-agent
+
+# First non-loopback IPv4 address in `qm guest cmd ... network-get-interfaces`.
+kasm_ipv4_regex: '"ip-address" *: *"(?!127\.)([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"'
+
+# --- Omarchy (os: omarchy) ---------------------------------------------------
+# Release to install: the tag of https://github.com/omacom/omarchy/releases
+# (no leading v unless the tag has one). Required for os: omarchy. The ISO and
+# its .sha256 come from iso.omarchy.org.
+kasm_omarchy_version: ""
+kasm_omarchy_iso_dir: /var/lib/vz/template/iso
+kasm_omarchy_iso_storage: local
+
+# user_configuration.json written by one interactive Omarchy install (the
+# installer leaves it in /root). The playbook feeds it to the unattended
+# install, so it must name the target disk (/dev/sda for the scsi0 disk this
+# role creates) and must not enable disk_encryption.
+kasm_omarchy_config_file: "{{ playbook_dir }}/files/omarchy/user_configuration.json"
+
+# Login created by the install. The hash comes from `openssl passwd -6`; keep
+# it in your secret store (Infisical/Vault), not in the repo. It is also set as
+# root's password hash, as the installer does.
+kasm_omarchy_username: omarchy
+kasm_omarchy_password_hash: ""
+
+# wayvnc, started with the graphical session. Kasm connects to this port as a
+# VNC server. Auth is wayvnc's username/password over TLS; the certificate is
+# generated once in the template, so clones share it.
+kasm_omarchy_vnc_port: 5900
+kasm_omarchy_vnc_user: "{{ kasm_omarchy_username }}"
+kasm_omarchy_vnc_password: ""
+
+# Let cloud-init configure the network on clones (Proxmox's ipconfig0). Off by
+# default: Omarchy uses NetworkManager and the installed system takes DHCP.
+kasm_omarchy_cloudinit_network: false
+
+# Finding the build VM, which gets its address by DHCP: the node scans the
+# bridge's subnet for the VM's MAC. Set build_ip on the template to skip that,
+# or kasm_omarchy_scan_cidr to scan something other than the bridge's subnet.
+kasm_omarchy_scan_cidr: ""
+kasm_omarchy_install_retries: 120   # x kasm_omarchy_install_delay
+kasm_omarchy_install_delay: 15
+
+# Hide the output of tasks that handle the SSH key / cloud-init data. Turn it on when the
+# play's output is shipped somewhere other than your own terminal.
+kasm_template_no_log: false

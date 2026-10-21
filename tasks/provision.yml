@@ -1,0 +1,54 @@
+---
+# Runs inside the build VM (group kasm_build).
+- name: Wait for SSH
+  ansible.builtin.wait_for_connection:
+    timeout: 300
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  when: kasm_os.method | default('cloud-image') == 'cloud-image'
+
+- name: Gather facts
+  ansible.builtin.setup:
+
+- name: Omarchy desktop (wayvnc)
+  ansible.builtin.include_tasks: provision-omarchy.yml
+  when: kasm_os.method | default('cloud-image') == 'iso'
+
+- name: Provision the cloud-image OS
+  when: kasm_os.method | default('cloud-image') == 'cloud-image'
+  block:
+    - name: Check the OS has tasks for this kind
+      ansible.builtin.assert:
+        that: not (kasm_vm.kind == 'desktop' and kasm_os.family == 'arch')
+        fail_msg: "kind: desktop is only supported on Debian and Ubuntu (xrdp is not in Arch's repositories)"
+        quiet: true
+
+    - name: Base packages and upgrades
+      ansible.builtin.include_tasks: "base-{{ kasm_os.family }}.yml"
+
+    - name: Docker for agent templates
+      ansible.builtin.include_tasks: "docker-{{ kasm_os.family }}.yml"
+      when: kasm_vm.kind == 'agent'
+
+    - name: Pre-pull Docker images
+      ansible.builtin.command: docker pull {{ item }}
+      loop: "{{ kasm_template_prepull_images }}"
+      changed_when: true
+      when: kasm_vm.kind == 'agent'
+
+    - name: Desktop and RDP for desktop templates
+      ansible.builtin.include_tasks: desktop-debian.yml
+      when: kasm_vm.kind == 'desktop'
+
+    - name: Clean the guest so clones start fresh
+      ansible.builtin.include_tasks: "clean-{{ kasm_os.family }}.yml"
+
+    - name: Reset cloud-init, machine-id and SSH host keys
+      ansible.builtin.shell: |
+        cloud-init clean --logs
+        truncate -s 0 /etc/machine-id
+        rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_*
+        rm -f /root/.bash_history /home/*/.bash_history
+      changed_when: true

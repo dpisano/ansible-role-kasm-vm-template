@@ -1,0 +1,127 @@
+---
+# Runs inside the Omarchy build VM. No upgrade: Omarchy is updated with its
+# own `omarchy-update`, not a blind pacman -Syu.
+- name: Install the guest agent and wayvnc
+  community.general.pacman:
+    name: [qemu-guest-agent, cloud-init, wayvnc, openssl]
+    state: present
+    update_cache: true
+
+- name: Enable the guest agent
+  ansible.builtin.systemd:
+    name: qemu-guest-agent
+    enabled: true
+
+# Proxmox's cloud-init drive is a NoCloud datasource. By default cloud-init
+# leaves networking to Omarchy's NetworkManager (DHCP), so a clone's static
+# ipconfig is ignored; set kasm_omarchy_cloudinit_network to let it render one.
+- name: Configure cloud-init
+  ansible.builtin.copy:
+    content: |
+      datasource_list: [NoCloud, None]
+      {% if not kasm_omarchy_cloudinit_network | bool %}
+      network: {config: disabled}
+      {% endif %}
+    dest: /etc/cloud/cloud.cfg.d/99-kasm.cfg
+    mode: "0644"
+
+- name: Enable the cloud-init units
+  ansible.builtin.shell: |
+    set -o pipefail
+    for u in $(systemctl list-unit-files 'cloud-*.service' --no-legend | awk '{print $1}'); do
+      systemctl enable "$u"
+    done
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Create wayvnc's config directory
+  ansible.builtin.file:
+    path: "/home/{{ kasm_os.user }}/{{ item }}"
+    state: directory
+    owner: "{{ kasm_os.user }}"
+    group: "{{ kasm_os.user }}"
+    mode: "0700"
+  loop: [.config/wayvnc, .config/systemd/user]
+
+- name: Generate wayvnc's TLS certificate
+  ansible.builtin.command: >-
+    openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes
+    -keyout key.pem -out cert.pem -subj /CN={{ kasm_vm.name }}
+  args:
+    chdir: "/home/{{ kasm_os.user }}/.config/wayvnc"
+    creates: "/home/{{ kasm_os.user }}/.config/wayvnc/cert.pem"
+  become: true
+  become_user: "{{ kasm_os.user }}"
+
+- name: Configure wayvnc
+  ansible.builtin.copy:
+    content: |
+      address=0.0.0.0
+      port={{ kasm_omarchy_vnc_port }}
+      enable_auth=true
+      username={{ kasm_omarchy_vnc_user }}
+      password={{ kasm_omarchy_vnc_password }}
+      private_key_file=/home/{{ kasm_os.user }}/.config/wayvnc/key.pem
+      certificate_file=/home/{{ kasm_os.user }}/.config/wayvnc/cert.pem
+    dest: "/home/{{ kasm_os.user }}/.config/wayvnc/config"
+    owner: "{{ kasm_os.user }}"
+    group: "{{ kasm_os.user }}"
+    mode: "0600"
+  no_log: "{{ kasm_template_no_log }}"
+
+# A user unit tied to the graphical session works whichever Hyprland config
+# format this Omarchy release uses; the session (uwsm) exports WAYLAND_DISPLAY.
+- name: Run wayvnc with the graphical session
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=wayvnc, for Kasm
+      PartOf=graphical-session.target
+      After=graphical-session.target
+
+      [Service]
+      ExecStart=/usr/bin/wayvnc
+      Restart=on-failure
+      RestartSec=3
+
+      [Install]
+      WantedBy=graphical-session.target
+    dest: "/home/{{ kasm_os.user }}/.config/systemd/user/wayvnc.service"
+    owner: "{{ kasm_os.user }}"
+    group: "{{ kasm_os.user }}"
+    mode: "0644"
+
+- name: Create the unit's wants directory
+  ansible.builtin.file:
+    path: "/home/{{ kasm_os.user }}/.config/systemd/user/graphical-session.target.wants"
+    state: directory
+    owner: "{{ kasm_os.user }}"
+    group: "{{ kasm_os.user }}"
+    mode: "0755"
+
+- name: Enable the unit
+  ansible.builtin.file:
+    src: "/home/{{ kasm_os.user }}/.config/systemd/user/wayvnc.service"
+    dest: "/home/{{ kasm_os.user }}/.config/systemd/user/graphical-session.target.wants/wayvnc.service"
+    state: link
+    owner: "{{ kasm_os.user }}"
+    group: "{{ kasm_os.user }}"
+
+- name: Open the VNC port in Omarchy's firewall
+  ansible.builtin.command: ufw allow {{ kasm_omarchy_vnc_port }}/tcp
+  changed_when: true
+
+- name: Clear the pacman cache
+  ansible.builtin.command: pacman -Scc --noconfirm
+  changed_when: true
+
+# sshd regenerates its host keys on start (sshdgenkeys.service); an empty
+# machine-id is refilled on the next boot.
+- name: Reset machine-id and SSH host keys
+  ansible.builtin.shell: |
+    cloud-init clean --logs
+    truncate -s 0 /etc/machine-id
+    rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_*
+    rm -f /root/.bash_history /home/*/.bash_history
+  changed_when: true

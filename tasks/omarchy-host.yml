@@ -1,0 +1,28 @@
+---
+# Once per run, on the Proxmox node, when any template is os: omarchy.
+- name: Check the Omarchy settings
+  ansible.builtin.assert:
+    that:
+      - kasm_omarchy_version | length > 0
+      - kasm_omarchy_password_hash | length > 0
+      - kasm_omarchy_vnc_password | length > 0
+      - (kasm_templates | selectattr('os', 'eq', 'omarchy') | map(attribute='kind', default='desktop') | unique | list) in [['desktop'], []]
+      - (lookup('file', kasm_omarchy_config_file) | from_json).disk_config.disk_encryption is not defined
+    fail_msg: >-
+      os: omarchy needs kasm_omarchy_version, kasm_omarchy_password_hash and
+      kasm_omarchy_vnc_password, kind: desktop, and a
+      user_configuration.json (kasm_omarchy_config_file) without
+      disk_encryption. See the role README.
+    quiet: true
+
+- name: Install the tools that build the cidata drive and find the VM
+  ansible.builtin.apt:
+    name: [genisoimage, nmap]
+    state: present
+
+- name: Download the Omarchy ISO, verified against its published checksum
+  ansible.builtin.get_url:
+    url: "https://iso.omarchy.org/omarchy-{{ kasm_omarchy_version }}.iso"
+    dest: "{{ kasm_omarchy_iso_dir }}/omarchy-{{ kasm_omarchy_version }}.iso"
+    checksum: "sha256:https://iso.omarchy.org/omarchy-{{ kasm_omarchy_version }}.iso.sha256"
+    mode: "0644"

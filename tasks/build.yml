@@ -1,0 +1,57 @@
+---
+- name: Check the OS of every template
+  ansible.builtin.assert:
+    that:
+      - item.os in kasm_template_os
+      - (kasm_template_defaults | combine(item)).kind in ['agent', 'desktop']
+    fail_msg: "{{ item.name | default('?') }}: os must be one of {{ kasm_template_os.keys() | list }} and kind agent or desktop"
+    quiet: true
+  loop: "{{ kasm_templates }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Enable snippets on the snippets storage
+  block:
+    - name: Check the storage for snippets
+      ansible.builtin.command: pvesm status --storage {{ kasm_template_snippets_storage }} --content snippets
+      register: kasm_snippets_check
+      changed_when: false
+      failed_when: false
+
+    - name: Add the snippets content type
+      ansible.builtin.shell: |
+        set -o pipefail
+        pvesm set {{ kasm_template_snippets_storage }} --content "$(pvesm config {{ kasm_template_snippets_storage }} | awk '/^content/{print $2}'),snippets"
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: kasm_snippets_check.stdout_lines | length < 2
+
+- name: Create the image and snippet directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ kasm_template_image_dir }}"
+    - "{{ kasm_template_snippets_dir }}"
+
+- name: Download the cloud image for each OS in use
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ kasm_template_image_dir }}/{{ item.file }}"
+    mode: "0644"
+  loop: "{{ kasm_templates | map(attribute='os') | unique | map('extract', kasm_template_os) | selectattr('file', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.file }}"
+
+- name: Prepare for Omarchy
+  ansible.builtin.include_tasks: omarchy-host.yml
+  when: kasm_templates | selectattr('os', 'eq', 'omarchy') | list | length > 0
+
+- name: Build each template VM
+  ansible.builtin.include_tasks: vm.yml
+  loop: "{{ kasm_templates }}"
+  loop_control:
+    loop_var: kasm_item
+    label: "{{ kasm_item.name }}"

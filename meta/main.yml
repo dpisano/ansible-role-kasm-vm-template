@@ -1,0 +1,21 @@
+---
+galaxy_info:
+  role_name: kasm_vm_template
+  namespace: dpisano
+  author: David Pisano
+  description: Build Proxmox VM templates (Docker agent or desktop) for Kasm Workspaces
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - all
+    - name: Ubuntu
+      versions:
+        - all
+  galaxy_tags:
+    - kasm
+    - proxmox
+    - template
+
+dependencies: []

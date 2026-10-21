@@ -1,0 +1,63 @@
+---
+- name: Write the cloud-init user-data
+  ansible.builtin.template:
+    src: user-data.yml.j2
+    dest: "{{ kasm_template_snippets_dir }}/kasm-tpl-{{ kasm_vm.vmid }}.yml"
+    mode: "0644"
+
+- name: Create the VM
+  ansible.builtin.command: >-
+    qm create {{ kasm_vm.vmid }}
+    --name {{ kasm_vm.name }}
+    --ostype l26
+    --cpu host
+    --cores {{ kasm_vm.cores }}
+    --memory {{ kasm_vm.memory }}
+    --scsihw virtio-scsi-pci
+    --net0 virtio,bridge={{ kasm_vm.bridge }}{{ ',tag=' ~ kasm_vm.vlan if kasm_vm.vlan | string else '' }}
+    --agent enabled=1
+    --serial0 socket --vga serial0
+    --ipconfig0 ip=dhcp
+    --tags kasm
+  changed_when: true
+
+- name: Import the cloud image as the boot disk
+  ansible.builtin.command: >-
+    qm set {{ kasm_vm.vmid }}
+    --scsi0 {{ kasm_vm.storage }}:0,import-from={{ kasm_template_image_dir }}/{{ kasm_os.file }},discard=on,ssd=1
+    --boot order=scsi0
+  changed_when: true
+
+- name: Grow the disk
+  ansible.builtin.command: qm resize {{ kasm_vm.vmid }} scsi0 {{ kasm_vm.disk }}G
+  changed_when: true
+
+- name: Attach the cloud-init drive and user-data
+  ansible.builtin.command: >-
+    qm set {{ kasm_vm.vmid }}
+    --ide2 {{ kasm_vm.storage }}:cloudinit
+    --cicustom user={{ kasm_template_snippets_storage }}:snippets/kasm-tpl-{{ kasm_vm.vmid }}.yml
+  changed_when: true
+
+- name: Start the VM
+  ansible.builtin.command: qm start {{ kasm_vm.vmid }}
+  changed_when: true
+
+- name: Wait for the guest agent to report an address
+  ansible.builtin.command: qm guest cmd {{ kasm_vm.vmid }} network-get-interfaces
+  register: kasm_nics
+  until: kasm_nics.rc == 0 and kasm_nics.stdout is regex(kasm_ipv4_regex)
+  retries: "{{ kasm_template_boot_retries }}"
+  delay: "{{ kasm_template_boot_delay }}"
+  changed_when: false
+  failed_when: false
+
+- name: Fail if the VM never came up
+  ansible.builtin.fail:
+    msg: "{{ kasm_vm.name }} never reported an IPv4 address; check `qm terminal {{ kasm_vm.vmid }}`"
+  when: kasm_nics.rc != 0 or kasm_nics.stdout is not regex(kasm_ipv4_regex)
+
+
+- name: Remember the VM's address
+  ansible.builtin.set_fact:
+    kasm_vm_ip: "{{ kasm_nics.stdout | regex_search(kasm_ipv4_regex, '\\1') | first }}"

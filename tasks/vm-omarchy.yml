@@ -1,0 +1,118 @@
+---
+# Unattended Omarchy install: the ISO's second drive, labeled cidata, carries
+# the installer's own config files (docs: manual/51-unattended-installs.md).
+- name: Build the cidata drive
+  block:
+    - name: Make a scratch directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: kasm-cidata-
+      register: kasm_cidata_dir
+
+    - name: Write the installer's files
+      ansible.builtin.copy:
+        content: "{{ item.content }}"
+        dest: "{{ kasm_cidata_dir.path }}/{{ item.name }}"
+        mode: "0600"
+      loop:
+        - name: user_configuration.json
+          content: "{{ lookup('file', kasm_omarchy_config_file) }}"
+        - name: user_credentials.json
+          content: >-
+            {{ {'root_enc_password': kasm_omarchy_password_hash,
+                'users': [{'enc_password': kasm_omarchy_password_hash,
+                           'groups': [], 'sudo': true,
+                           'username': kasm_omarchy_username}]} | to_nice_json }}
+        - name: user_encrypt_installation.txt
+          content: "false\n"
+        - name: authorized_keys
+          content: "{{ kasm_template_ssh_public_key }}\n"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: "{{ kasm_template_no_log }}"
+
+    - name: Make the cidata ISO
+      ansible.builtin.command: >-
+        genisoimage -output {{ kasm_omarchy_iso_dir }}/kasm-cidata-{{ kasm_vm.vmid }}.iso
+        -volid cidata -joliet -rock {{ kasm_cidata_dir.path }}
+      changed_when: true
+  always:
+    - name: Remove the scratch directory
+      ansible.builtin.file:
+        path: "{{ kasm_cidata_dir.path }}"
+        state: absent
+      when: kasm_cidata_dir.path is defined
+
+- name: Pick the VM's MAC (so it can be found by DHCP lease)
+  ansible.builtin.set_fact:
+    kasm_vm_mac: "{{ 'BC:24:11:%02X:%02X:%02X' | format(kasm_vm.vmid | int // 65536 % 256, kasm_vm.vmid | int // 256 % 256, kasm_vm.vmid | int % 256) }}"
+
+- name: Create the VM
+  ansible.builtin.command:
+    argv:
+      - qm
+      - create
+      - "{{ kasm_vm.vmid }}"
+      - --name
+      - "{{ kasm_vm.name }}"
+      - --ostype
+      - l26
+      - --bios
+      - ovmf
+      - --machine
+      - q35
+      - --cpu
+      - host
+      - --cores
+      - "{{ kasm_vm.cores }}"
+      - --memory
+      - "{{ kasm_vm.memory }}"
+      - --scsihw
+      - virtio-scsi-single
+      - --efidisk0
+      - "{{ kasm_vm.storage }}:0,efitype=4m,pre-enrolled-keys=0"
+      - --scsi0
+      - "{{ kasm_vm.storage }}:{{ kasm_vm.disk }},discard=on,iothread=1"
+      - --net0
+      - "virtio={{ kasm_vm_mac }},bridge={{ kasm_vm.bridge }}{{ ',tag=' ~ kasm_vm.vlan if kasm_vm.vlan | string else '' }}"
+      - --vga
+      - "{{ kasm_vm.vga | default('virtio') }}"
+      - --agent
+      - enabled=1
+      - --ide2
+      - "{{ kasm_omarchy_iso_storage }}:iso/omarchy-{{ kasm_omarchy_version }}.iso,media=cdrom"
+      - --ide3
+      - "{{ kasm_omarchy_iso_storage }}:iso/kasm-cidata-{{ kasm_vm.vmid }}.iso,media=cdrom"
+      - --boot
+      - order=scsi0;ide2
+      - --tags
+      - kasm
+  changed_when: true
+
+- name: Start the VM; the install runs and reboots by itself
+  ansible.builtin.command: qm start {{ kasm_vm.vmid }}
+  changed_when: true
+
+# The live ISO runs no SSH server, so port 22 answering means the installed
+# system is up (the install enables sshd for authorized_keys).
+- name: Wait for the installed system's SSH
+  ansible.builtin.shell: |
+    set -o pipefail
+    ip={{ kasm_vm.build_ip | default('') | quote }}
+    if [ -z "$ip" ]; then
+      cidr={{ kasm_omarchy_scan_cidr | quote }}
+      [ -n "$cidr" ] || cidr=$(ip -4 -o addr show dev {{ kasm_vm.bridge }} | awk '{print $4; exit}')
+      ip=$(nmap -sn -n "$cidr" | awk -v m='{{ kasm_vm_mac }}' '/^Nmap scan report/{a=$NF} toupper($0) ~ m {print a; exit}')
+    fi
+    [ -n "$ip" ] && timeout 3 bash -c "echo > /dev/tcp/$ip/22" && echo "$ip"
+  args:
+    executable: /bin/bash
+  register: kasm_omarchy_ip
+  until: kasm_omarchy_ip.rc == 0
+  retries: "{{ kasm_omarchy_install_retries }}"
+  delay: "{{ kasm_omarchy_install_delay }}"
+  changed_when: false
+
+- name: Remember the VM's address
+  ansible.builtin.set_fact:
+    kasm_vm_ip: "{{ kasm_omarchy_ip.stdout | trim }}"

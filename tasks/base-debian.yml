@@ -1,0 +1,17 @@
+---
+- name: Upgrade packages
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: dist
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: [qemu-guest-agent, cloud-init, curl, ca-certificates, gnupg, sudo, htop, vim]
+    state: present
+
+- name: Enable the guest agent
+  ansible.builtin.systemd:
+    name: qemu-guest-agent
+    enabled: true

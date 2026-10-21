@@ -1,0 +1,8 @@
+---
+- name: Install Docker
+  community.general.pacman:
+    name: [docker, docker-compose, docker-buildx]
+    state: present
+
+- name: Enable Docker and let the login user run it
+  ansible.builtin.include_tasks: docker-common.yml

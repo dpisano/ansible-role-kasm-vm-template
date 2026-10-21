@@ -1,0 +1,25 @@
+---
+- name: Install XFCE and xrdp
+  ansible.builtin.apt:
+    name: [xfce4, xfce4-goodies, xrdp, dbus-x11, xorgxrdp]
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Start XFCE for RDP sessions
+  ansible.builtin.copy:
+    content: "xfce4-session\n"
+    dest: "/home/{{ kasm_os.user }}/.xsession"
+    owner: "{{ kasm_os.user }}"
+    mode: "0644"
+
+- name: Let xrdp read the TLS key
+  ansible.builtin.user:
+    name: xrdp
+    groups: ssl-cert
+    append: true
+
+- name: Enable xrdp
+  ansible.builtin.systemd:
+    name: xrdp
+    enabled: true

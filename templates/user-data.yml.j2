@@ -1,0 +1,10 @@
+#cloud-config
+# Build-time user-data for {{ kasm_item.name }}; removed before the VM becomes
+# a template, so clones use Proxmox's own cloud-init settings.
+hostname: {{ kasm_item.name }}
+manage_etc_hosts: true
+ssh_authorized_keys:
+  - {{ kasm_template_ssh_public_key }}
+runcmd:
+  - {{ kasm_os.agent_install }}
+  - systemctl enable --now qemu-guest-agent

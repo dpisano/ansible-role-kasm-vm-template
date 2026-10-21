@@ -1,0 +1,62 @@
+---
+- name: Merge defaults for {{ kasm_item.name }}
+  ansible.builtin.set_fact:
+    kasm_vm: "{{ kasm_template_defaults | combine(kasm_item) }}"
+    kasm_os: "{{ kasm_template_os[kasm_item.os] }}"
+
+- name: Look up VMID {{ kasm_vm.vmid }}
+  ansible.builtin.command: qm config {{ kasm_vm.vmid }}
+  register: kasm_existing
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to touch an existing VM that is not a template
+  ansible.builtin.fail:
+    msg: >-
+      VMID {{ kasm_vm.vmid }} exists and is not a template (an earlier build
+      may have failed). Remove it with `qm destroy {{ kasm_vm.vmid }}` or set
+      kasm_template_rebuild=true.
+  when:
+    - kasm_existing.rc == 0
+    - not kasm_template_rebuild | bool
+    - "'template: 1' not in kasm_existing.stdout"
+
+- name: Skip an existing template
+  ansible.builtin.debug:
+    msg: "{{ kasm_vm.name }} (VMID {{ kasm_vm.vmid }}) is already a template, skipping"
+  when:
+    - kasm_existing.rc == 0
+    - not kasm_template_rebuild | bool
+
+- name: Build the VM
+  when: kasm_existing.rc != 0 or kasm_template_rebuild | bool
+  block:
+    - name: Destroy the old VM
+      ansible.builtin.shell: |
+        qm stop {{ kasm_vm.vmid }} --skiplock 2>/dev/null || true
+        qm destroy {{ kasm_vm.vmid }} --purge
+      changed_when: true
+      when: kasm_existing.rc == 0
+
+    - name: Create and boot the VM from a cloud image
+      ansible.builtin.include_tasks: vm-cloud-image.yml
+      when: kasm_os.method | default('cloud-image') == 'cloud-image'
+
+    - name: Create and boot the VM from the Omarchy ISO
+      ansible.builtin.include_tasks: vm-omarchy.yml
+      when: kasm_os.method | default('cloud-image') == 'iso'
+
+    - name: Add the VM to the in-memory build group
+      ansible.builtin.add_host:
+        name: "{{ kasm_vm.name }}"
+        groups: kasm_build
+        ansible_host: "{{ kasm_vm_ip }}"
+        ansible_user: "{{ kasm_os.user }}"
+        ansible_become: true
+        ansible_python_interpreter: /usr/bin/python3
+        ansible_ssh_common_args: >-
+          -o ProxyJump=root@{{ ansible_host | default(inventory_hostname) }}
+          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+        kasm_vm: "{{ kasm_vm }}"
+        kasm_os: "{{ kasm_os }}"
+        kasm_pve_node: "{{ inventory_hostname }}"

@@ -1,0 +1,6 @@
+---
+- name: Remove unused packages and the apt cache
+  ansible.builtin.apt:
+    autoremove: true
+    autoclean: true
+    clean: true

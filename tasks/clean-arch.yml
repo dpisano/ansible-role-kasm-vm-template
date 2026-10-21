@@ -1,0 +1,4 @@
+---
+- name: Clear the pacman cache
+  ansible.builtin.command: pacman -Scc --noconfirm
+  changed_when: true

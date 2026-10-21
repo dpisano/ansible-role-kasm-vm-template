@@ -1,0 +1,12 @@
+---
+- name: Enable Docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Add the login user to the docker group
+  ansible.builtin.user:
+    name: "{{ kasm_os.user }}"
+    groups: docker
+    append: true

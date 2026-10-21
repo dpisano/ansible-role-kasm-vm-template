@@ -1,0 +1,6 @@
+---
+# The build is split in three phases the playbook runs as separate plays: the
+# VM is created on the Proxmox node, provisioned over SSH (through the node),
+# then cleaned up and converted to a template. See kasm-template.yml in homelab-ansible.
+- name: Pick the phase
+  ansible.builtin.include_tasks: "{{ kasm_template_phase }}.yml"
