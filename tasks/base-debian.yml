@@ -6,9 +6,11 @@
   environment:
     DEBIAN_FRONTEND: noninteractive
 
+# wget and psmisc (fuser) are used by Kasm's agent startup script; Debian's
+# cloud image has neither.
 - name: Install base packages
   ansible.builtin.apt:
-    name: [qemu-guest-agent, cloud-init, curl, ca-certificates, gnupg, sudo, htop, vim]
+    name: [qemu-guest-agent, cloud-init, curl, ca-certificates, gnupg, sudo, htop, vim, wget, psmisc]
     state: present
 
 - name: Enable the guest agent
