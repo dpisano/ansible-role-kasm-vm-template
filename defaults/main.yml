@@ -145,9 +145,19 @@ kasm_popos_iso_storage: local
 # (key and passwordless sudo are added through the guest agent).
 kasm_popos_username: kasm
 
-# What xrdp starts. gnome-session is the GNOME-based Pop!_OS 22.04; COSMIC
-# (24.04) is Wayland-only and does not work with xrdp.
+# How the desktop is reached. xrdp (RDP) for the GNOME-based Pop!_OS 22.04,
+# wayvnc (VNC, best effort) for COSMIC (24.04+), which is Wayland-only. auto
+# picks wayvnc when cosmic-session is installed.
+kasm_popos_remote: auto
+
+# xrdp: what it starts.
 kasm_popos_session_command: gnome-session
+
+# wayvnc: Kasm connects to this port as a VNC server with this login. The
+# certificate is generated once in the template, so clones share it.
+kasm_popos_vnc_port: 5900
+kasm_popos_vnc_user: "{{ kasm_popos_username }}"
+kasm_popos_vnc_password: ""
 
 # Let cloud-init configure the network on clones (Proxmox's ipconfig0). Off by
 # default: Pop!_OS uses NetworkManager and takes DHCP.

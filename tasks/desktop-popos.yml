@@ -1,51 +1,26 @@
 ---
-# Pop!_OS desktop reached over RDP. Works with the GNOME-based Pop!_OS (22.04);
-# COSMIC (24.04+) is Wayland-only and has no xrdp session.
-- name: Check Pop!_OS has a session xrdp can start
-  ansible.builtin.shell: command -v {{ kasm_popos_session_command.split()[0] }}
-  args:
-    executable: /bin/bash
-  register: kasm_popos_session
-  changed_when: false
-  failed_when: false
+# Pop!_OS desktop. The GNOME-based release (22.04) is reached over RDP with
+# xrdp; COSMIC (24.04+) is Wayland-only, so it gets wayvnc, a VNC server that
+# Kasm connects to as a VNC server. kasm_popos_remote picks one (auto looks for
+# cosmic-session).
+- name: Look for COSMIC
+  ansible.builtin.stat:
+    path: /usr/bin/cosmic-session
+  register: kasm_popos_cosmic
 
-- name: Fail on a desktop xrdp cannot start
-  ansible.builtin.fail:
-    msg: >-
-      '{{ kasm_popos_session_command.split()[0] }}' is not installed. COSMIC
-      (Pop!_OS 24.04) is Wayland-only and cannot be used with xrdp; use
-      Pop!_OS 22.04, or set kasm_popos_session_command to an X11 session.
-  when: kasm_popos_session.rc != 0
+- name: Pick the remote desktop
+  ansible.builtin.set_fact:
+    kasm_popos_remote_mode: >-
+      {{ kasm_popos_remote if kasm_popos_remote != 'auto'
+         else ('wayvnc' if kasm_popos_cosmic.stat.exists else 'xrdp') }}
 
-- name: Install xrdp
-  ansible.builtin.apt:
-    name: [xrdp, xorgxrdp, dbus-x11]
-    state: present
-  environment:
-    DEBIAN_FRONTEND: noninteractive
+- name: Set up xrdp
+  ansible.builtin.include_tasks: desktop-popos-xrdp.yml
+  when: kasm_popos_remote_mode == 'xrdp'
 
-- name: Start the Pop!_OS session for RDP
-  ansible.builtin.copy:
-    content: |
-      export GNOME_SHELL_SESSION_MODE=pop
-      export XDG_CURRENT_DESKTOP=pop:GNOME
-      export XDG_SESSION_DESKTOP=pop
-      exec {{ kasm_popos_session_command }}
-    dest: "/home/{{ kasm_os.user }}/.xsession"
-    owner: "{{ kasm_os.user }}"
-    group: "{{ kasm_os.user }}"
-    mode: "0644"
-
-- name: Let xrdp read the TLS key
-  ansible.builtin.user:
-    name: xrdp
-    groups: ssl-cert
-    append: true
-
-- name: Enable xrdp
-  ansible.builtin.systemd:
-    name: xrdp
-    enabled: true
+- name: Set up wayvnc
+  ansible.builtin.include_tasks: desktop-popos-wayvnc.yml
+  when: kasm_popos_remote_mode == 'wayvnc'
 
 # Proxmox's cloud-init drive is a NoCloud datasource. Pop!_OS uses
 # NetworkManager and takes DHCP, so by default cloud-init leaves networking

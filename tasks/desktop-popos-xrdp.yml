@@ -1,0 +1,46 @@
+---
+- name: Check Pop!_OS has a session xrdp can start
+  ansible.builtin.shell: command -v {{ kasm_popos_session_command.split()[0] }}
+  args:
+    executable: /bin/bash
+  register: kasm_popos_session
+  changed_when: false
+  failed_when: false
+
+- name: Fail on a desktop xrdp cannot start
+  ansible.builtin.fail:
+    msg: >-
+      '{{ kasm_popos_session_command.split()[0] }}' is not installed. COSMIC
+      (Pop!_OS 24.04) is Wayland-only and cannot be used with xrdp; use
+      Pop!_OS 22.04, or set kasm_popos_session_command to an X11 session.
+  when: kasm_popos_session.rc != 0
+
+- name: Install xrdp
+  ansible.builtin.apt:
+    name: [xrdp, xorgxrdp, dbus-x11]
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Start the Pop!_OS session for RDP
+  ansible.builtin.copy:
+    content: |
+      export GNOME_SHELL_SESSION_MODE=pop
+      export XDG_CURRENT_DESKTOP=pop:GNOME
+      export XDG_SESSION_DESKTOP=pop
+      exec {{ kasm_popos_session_command }}
+    dest: "/home/{{ kasm_os.user }}/.xsession"
+    owner: "{{ kasm_os.user }}"
+    group: "{{ kasm_os.user }}"
+    mode: "0644"
+
+- name: Let xrdp read the TLS key
+  ansible.builtin.user:
+    name: xrdp
+    groups: ssl-cert
+    append: true
+
+- name: Enable xrdp
+  ansible.builtin.systemd:
+    name: xrdp
+    enabled: true

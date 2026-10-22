@@ -33,7 +33,7 @@ set those on the clone or in Kasm's autoscale config.
 | `debian-12`, `debian-13` | Debian genericcloud | yes | yes |
 | `arch` | Arch Linux cloud image | yes | no (xrdp is AUR-only) |
 | `omarchy` | Omarchy ISO, unattended | no | yes (wayvnc) |
-| `popos` | Pop!_OS ISO, installed by hand | no | yes (xrdp) |
+| `popos` | Pop!_OS ISO, installed by hand | no | yes (xrdp, or wayvnc for COSMIC) |
 
 To add an OS, add an entry to `kasm_template_os` with its image URL, default
 user, and a command that installs the guest agent. If it needs a new package
@@ -91,20 +91,28 @@ only, and the role runs twice:
    `sudo apt install -y qemu-guest-agent && sudo reboot`.
 3. Run again. The role finds the VM, uses the guest agent (as root) to install
    sshd, authorize `kasm_template_ssh_public_key` and allow passwordless sudo
-   for that user, then provisions it like the other desktops: xrdp with a
-   `gnome-session` login, cloud-init for clones, a clean-up, and `qm template`.
+   for that user, then provisions it like the other desktops: remote access
+   (below), cloud-init for clones, a clean-up, and `qm template`.
 
 Things to know:
 
-- Use the GNOME-based **Pop!_OS 22.04**. COSMIC (24.04+) is Wayland-only and
-  has no xrdp session; the role stops with a message if `gnome-session` is
-  missing (set `kasm_popos_session_command` for another X11 session).
+- **Pop!_OS 22.04** (GNOME-based) is reached over RDP with xrdp and a
+  `gnome-session` login (`kasm_popos_session_command`).
+- **Pop!_OS 24.04** uses COSMIC, which is Wayland-only and has no xrdp session,
+  so it gets wayvnc and Kasm connects as a **VNC server** to
+  `kasm_popos_vnc_port` (5900) with `kasm_popos_vnc_user` /
+  `kasm_popos_vnc_password` (required). This is best effort: it needs COSMIC's
+  compositor to allow screen capture and input injection, which is unconfirmed.
+  Turn on automatic login in COSMIC's settings during the install so the
+  session (and wayvnc, started by an autostart entry) is up after a boot.
+  `kasm_popos_remote` forces `xrdp` or `wayvnc`; the default `auto` picks
+  wayvnc when `cosmic-session` is installed.
 - A VM that exists but is not yet a template is taken as the install to
   continue with. `-e kasm_template_rebuild=true` destroys it and starts over.
 - The passwordless-sudo file stays in the template, as on the cloud images.
 - Clones keep NetworkManager's DHCP; `kasm_popos_cloudinit_network: true` lets
   cloud-init apply a clone's static ipconfig instead (untested).
-- Untested on a real node: the xrdp login to Pop's GNOME session.
+- Untested on a real node: the xrdp login to Pop's GNOME session, and wayvnc on COSMIC.
 
 Qubes OS is not supported: it is a Xen-based OS with its own installer, no
 cloud image and no cloud-init, so it can't be cloned and provisioned this way.
