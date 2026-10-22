@@ -1,4 +1,12 @@
 ---
+# Decides what to do with one template from the VM's state in Proxmox:
+#   absent       build it from scratch
+#   template     nothing to do
+#   provisioned  built and provisioned earlier (tag kasm-provisioned), not yet a
+#                template: only finalize is left
+#   partial      created by this role (tag kasm) but provisioning did not finish:
+#                start it and provision it again
+#   foreign      not ours (no kasm tag): refuse, unless kasm_template_rebuild
 - name: Merge defaults for {{ kasm_item.name }}
   ansible.builtin.set_fact:
     kasm_vm: "{{ kasm_template_defaults | combine(kasm_item) }}"
@@ -10,47 +18,61 @@
   changed_when: false
   failed_when: false
 
-- name: Refuse to touch an existing VM that is not a template
+- name: Work out the VM's state
+  ansible.builtin.set_fact:
+    kasm_vm_state: >-
+      {{ 'absent' if kasm_existing.rc != 0
+         else 'template' if kasm_existing.stdout is search('(?m)^template: 1')
+         else 'provisioned' if kasm_existing.stdout is search('(?m)^tags:.*\b' ~ kasm_template_provisioned_tag ~ '\b')
+         else 'partial' if kasm_existing.stdout is search('(?m)^tags:.*\bkasm\b')
+         else 'foreign' }}
+
+- name: Refuse to touch a VM this role did not create
   ansible.builtin.fail:
     msg: >-
-      VMID {{ kasm_vm.vmid }} exists and is not a template (an earlier build
-      may have failed). Remove it with `qm destroy {{ kasm_vm.vmid }}` or set
-      kasm_template_rebuild=true.
-  when:
-    - kasm_existing.rc == 0
-    - not kasm_template_rebuild | bool
-    - "'template: 1' not in kasm_existing.stdout"
-    - kasm_os.method | default('cloud-image') != 'manual-iso'
+      VMID {{ kasm_vm.vmid }} exists, is not a template and has no kasm tag, so
+      it was not created by this role. Remove it with `qm destroy {{ kasm_vm.vmid }}`
+      or set kasm_template_rebuild=true.
+  when: kasm_vm_state == 'foreign' and not kasm_template_rebuild | bool
 
 - name: Skip an existing template
   ansible.builtin.debug:
     msg: "{{ kasm_vm.name }} (VMID {{ kasm_vm.vmid }}) is already a template, skipping"
-  when:
-    - kasm_existing.rc == 0
-    - not kasm_template_rebuild | bool
-    - "'template: 1' in kasm_existing.stdout"
+  when: kasm_vm_state == 'template' and not kasm_template_rebuild | bool
 
-# Installed by hand from the ISO, so a VM that exists but is not a template yet
-# is the one to carry on with, not an error.
+- name: Carry on from a VM that is already provisioned
+  ansible.builtin.include_tasks: add-build-host.yml
+  vars:
+    kasm_resume_provisioned: true
+    kasm_vm_ip: 127.0.0.1
+  when: kasm_vm_state == 'provisioned' and not kasm_template_rebuild | bool
+
+- name: Provision an unfinished VM again
+  ansible.builtin.include_tasks: vm-resume.yml
+  when:
+    - kasm_vm_state == 'partial'
+    - not kasm_template_rebuild | bool
+    - kasm_os.method | default('cloud-image') != 'manual-iso'
+
+# Installed by hand from the ISO: the first run creates the VM, the second takes
+# over the installed system (a partial VM).
 - name: Pop!_OS, installed by hand
   ansible.builtin.include_tasks: vm-popos.yml
   when:
     - kasm_os.method | default('cloud-image') == 'manual-iso'
-    - >-
-      kasm_existing.rc != 0 or 'template: 1' not in kasm_existing.stdout
-      or kasm_template_rebuild | bool
+    - kasm_vm_state in ['absent', 'partial'] or kasm_template_rebuild | bool
 
 - name: Build the VM
   when:
     - kasm_os.method | default('cloud-image') != 'manual-iso'
-    - kasm_existing.rc != 0 or kasm_template_rebuild | bool
+    - kasm_vm_state == 'absent' or kasm_template_rebuild | bool
   block:
     - name: Destroy the old VM
       ansible.builtin.shell: |
         qm stop {{ kasm_vm.vmid }} --skiplock 2>/dev/null || true
         qm destroy {{ kasm_vm.vmid }} --purge
       changed_when: true
-      when: kasm_existing.rc == 0
+      when: kasm_vm_state != 'absent'
 
     - name: Create and boot the VM from a cloud image
       ansible.builtin.include_tasks: vm-cloud-image.yml

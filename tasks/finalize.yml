@@ -1,5 +1,7 @@
 ---
-# Runs on the Proxmox node for each VM that was built.
+# Runs on the Proxmox node: shuts down and converts each provisioned VM. Every
+# step looks at the VM's config first, so it can be run again after a failure
+# partway through.
 # qm set --sshkeys takes the path of a file holding the key(s), not the key.
 - name: Write the SSH key to a file for qm
   ansible.builtin.copy:
@@ -7,70 +9,13 @@
     dest: "{{ kasm_template_sshkeys_file }}"
     mode: "0600"
 
-- name: Shut the VM down
-  ansible.builtin.command: qm shutdown {{ hostvars[item].kasm_vm.vmid }} --timeout 120
+- name: Finish each VM
+  ansible.builtin.include_tasks: finalize-vm.yml
   loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
-  when: hostvars[item].kasm_pve_node == inventory_hostname
-  changed_when: true
-
-- name: Detach the install media
-  ansible.builtin.command: >-
-    qm set {{ hostvars[item].kasm_vm.vmid }}
-    --delete ide2{{ ',ide3' if hostvars[item].kasm_os.method | default('cloud-image') == 'iso' else '' }}
-  loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
-  when:
-    - hostvars[item].kasm_pve_node == inventory_hostname
-    - hostvars[item].kasm_os.method | default('cloud-image') in ['iso', 'manual-iso']
-  changed_when: true
-
-- name: Add Proxmox's cloud-init drive to the ISO-installed template
-  ansible.builtin.command: >-
-    qm set {{ hostvars[item].kasm_vm.vmid }}
-    --ide2 {{ hostvars[item].kasm_vm.storage }}:cloudinit
-    --ciuser {{ hostvars[item].kasm_os.user }}
-    --sshkeys {{ kasm_template_sshkeys_file }}
-    --ipconfig0 ip=dhcp
-  loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
-  when:
-    - hostvars[item].kasm_pve_node == inventory_hostname
-    - hostvars[item].kasm_os.method | default('cloud-image') in ['iso', 'manual-iso']
-  changed_when: true
-
-- name: Detach build-time user-data
-  ansible.builtin.command: >-
-    qm set {{ hostvars[item].kasm_vm.vmid }}
-    --delete cicustom
-    --ciuser {{ hostvars[item].kasm_os.user }}
-    --sshkeys {{ kasm_template_sshkeys_file }}
-  loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
-  when:
-    - hostvars[item].kasm_pve_node == inventory_hostname
-    - hostvars[item].kasm_os.method | default('cloud-image') == 'cloud-image'
-  changed_when: true
-
-- name: Convert to a template
-  ansible.builtin.command: qm template {{ hostvars[item].kasm_vm.vmid }}
-  loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
-  when: hostvars[item].kasm_pve_node == inventory_hostname
-  changed_when: true
-
-- name: Remove the build-time user-data
-  ansible.builtin.file:
-    path: "{{ kasm_template_snippets_dir }}/kasm-tpl-{{ hostvars[item].kasm_vm.vmid }}.yml"
-    state: absent
-  loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
-  when:
-    - hostvars[item].kasm_pve_node == inventory_hostname
-    - hostvars[item].kasm_os.method | default('cloud-image') == 'cloud-image'
-
-- name: Remove the cidata drive image
-  ansible.builtin.file:
-    path: "{{ kasm_omarchy_iso_dir }}/kasm-cidata-{{ hostvars[item].kasm_vm.vmid }}.iso"
-    state: absent
-  loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
-  when:
-    - hostvars[item].kasm_pve_node == inventory_hostname
-    - hostvars[item].kasm_os.method | default('cloud-image') == 'iso'
+  loop_control:
+    loop_var: kasm_fin
+    label: "{{ kasm_fin }}"
+  when: hostvars[kasm_fin].kasm_pve_node == inventory_hostname
 
 - name: Remove the SSH key file
   ansible.builtin.file:

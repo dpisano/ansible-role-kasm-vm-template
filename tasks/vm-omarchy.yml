@@ -99,27 +99,5 @@
   ansible.builtin.command: qm start {{ kasm_vm.vmid }}
   changed_when: true
 
-# Port 22 answering only means the VM has an address: the live ISO runs sshd
-# too (it is built from Arch's releng profile). The provision play waits for a
-# login as the new user, which exists only once the install is done.
-- name: Wait for the VM's address and sshd
-  ansible.builtin.shell: |
-    set -o pipefail
-    ip={{ kasm_vm.build_ip | default('') | quote }}
-    if [ -z "$ip" ]; then
-      cidr={{ kasm_omarchy_scan_cidr | quote }}
-      [ -n "$cidr" ] || cidr=$(ip -4 -o addr show dev {{ kasm_vm.bridge }} | awk '{print $4; exit}')
-      ip=$(nmap -sn -n "$cidr" | awk -v m='{{ kasm_vm_mac }}' '/^Nmap scan report/{a=$NF} toupper($0) ~ m {print a; exit}')
-    fi
-    [ -n "$ip" ] && timeout 3 bash -c "echo > /dev/tcp/$ip/22" && echo "$ip"
-  args:
-    executable: /bin/bash
-  register: kasm_omarchy_ip
-  until: kasm_omarchy_ip.rc == 0
-  retries: "{{ kasm_omarchy_install_retries }}"
-  delay: "{{ kasm_omarchy_install_delay }}"
-  changed_when: false
-
-- name: Remember the VM's address
-  ansible.builtin.set_fact:
-    kasm_vm_ip: "{{ kasm_omarchy_ip.stdout | trim }}"
+- name: Wait for the VM's address
+  ansible.builtin.include_tasks: omarchy-address.yml

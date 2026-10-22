@@ -22,7 +22,11 @@ kasm_template_defaults:
   vlan: ""
   pool: ""
 
-# Rebuild a VMID that already exists as a template: destroys it first.
+# Proxmox tag the provision phase sets on a VM once it is fully provisioned, so a
+# later run can finish it (shut down, convert to a template) without redoing it.
+kasm_template_provisioned_tag: kasm-provisioned
+
+# Rebuild a VMID that already exists, as a template or half-built: destroys it first.
 kasm_template_rebuild: false
 
 # Public key authorized on the build VM; the controller must hold the private

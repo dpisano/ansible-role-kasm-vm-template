@@ -1,5 +1,10 @@
 ---
 # Runs inside the build VM (group kasm_build).
+# A VM provisioned by an earlier run (tag kasm-provisioned) only needs finalizing.
+- name: Skip a VM that is already provisioned
+  ansible.builtin.meta: end_host
+  when: kasm_provisioned | default(false) | bool
+
 # An Omarchy VM answers on port 22 from the live installer too (the ISO is built
 # from Arch's releng profile, which runs sshd), so the login as the new user is
 # what shows the install is done. That takes a while: wait as long as the build
@@ -102,3 +107,14 @@
         rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_*
         rm -f /root/.bash_history /home/*/.bash_history
       changed_when: true
+
+# The marker for finalize and for a later run: this VM is provisioned and only
+# needs to be shut down and converted. Set on the Proxmox node (the VM itself
+# can't), and last, so it only exists when everything above succeeded.
+- name: Mark the VM as provisioned
+  ansible.builtin.command:
+    argv: [qm, set, "{{ kasm_vm.vmid }}", --tags, "kasm;{{ kasm_template_provisioned_tag }}"]
+  delegate_to: "{{ kasm_pve_node }}"
+  vars:
+    ansible_become: false
+  changed_when: true
