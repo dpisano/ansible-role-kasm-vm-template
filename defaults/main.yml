@@ -28,6 +28,8 @@ kasm_template_rebuild: false
 # Public key authorized on the build VM; the controller must hold the private
 # half. The key stays in the template, so clones accept it too.
 kasm_template_ssh_public_key: "{{ users[0].ssh_key }}"
+# Temporary file on the node that qm set --sshkeys reads the key from.
+kasm_template_sshkeys_file: /var/tmp/kasm-template-sshkeys.pub
 
 # Proxmox storage holding cloud images (directory) and cloud-init snippets.
 kasm_template_image_dir: /var/lib/vz/template/iso/cloud-init

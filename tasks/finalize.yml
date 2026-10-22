@@ -1,5 +1,12 @@
 ---
 # Runs on the Proxmox node for each VM that was built.
+# qm set --sshkeys takes the path of a file holding the key(s), not the key.
+- name: Write the SSH key to a file for qm
+  ansible.builtin.copy:
+    content: "{{ kasm_template_ssh_public_key }}\n"
+    dest: "{{ kasm_template_sshkeys_file }}"
+    mode: "0600"
+
 - name: Shut the VM down
   ansible.builtin.command: qm shutdown {{ hostvars[item].kasm_vm.vmid }} --timeout 120
   loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
@@ -21,7 +28,7 @@
     qm set {{ hostvars[item].kasm_vm.vmid }}
     --ide2 {{ hostvars[item].kasm_vm.storage }}:cloudinit
     --ciuser {{ hostvars[item].kasm_os.user }}
-    --sshkeys {{ kasm_template_ssh_public_key | urlencode }}
+    --sshkeys {{ kasm_template_sshkeys_file }}
     --ipconfig0 ip=dhcp
   loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
   when:
@@ -34,7 +41,7 @@
     qm set {{ hostvars[item].kasm_vm.vmid }}
     --delete cicustom
     --ciuser {{ hostvars[item].kasm_os.user }}
-    --sshkeys {{ kasm_template_ssh_public_key | urlencode }}
+    --sshkeys {{ kasm_template_sshkeys_file }}
   loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
   when:
     - hostvars[item].kasm_pve_node == inventory_hostname
@@ -64,3 +71,8 @@
   when:
     - hostvars[item].kasm_pve_node == inventory_hostname
     - hostvars[item].kasm_os.method | default('cloud-image') == 'iso'
+
+- name: Remove the SSH key file
+  ansible.builtin.file:
+    path: "{{ kasm_template_sshkeys_file }}"
+    state: absent
