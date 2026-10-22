@@ -1,0 +1,17 @@
+---
+# Registers the VM (kasm_vm, kasm_os, kasm_vm_ip) as a host of the in-memory
+# build group, so the provision play can reach it through the node.
+- name: Add the VM to the in-memory build group
+  ansible.builtin.add_host:
+    name: "{{ kasm_vm.name }}"
+    groups: kasm_build
+    ansible_host: "{{ kasm_vm_ip }}"
+    ansible_user: "{{ kasm_os.user }}"
+    ansible_become: true
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_ssh_common_args: >-
+      -o ProxyJump=root@{{ ansible_host | default(inventory_hostname) }}
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+    kasm_vm: "{{ kasm_vm }}"
+    kasm_os: "{{ kasm_os }}"
+    kasm_pve_node: "{{ inventory_hostname }}"

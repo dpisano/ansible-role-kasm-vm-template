@@ -16,8 +16,8 @@
   ansible.builtin.include_tasks: provision-omarchy.yml
   when: kasm_os.method | default('cloud-image') == 'iso'
 
-- name: Provision the cloud-image OS
-  when: kasm_os.method | default('cloud-image') == 'cloud-image'
+- name: Provision the cloud-image or Pop!_OS system
+  when: kasm_os.method | default('cloud-image') in ['cloud-image', 'manual-iso']
   block:
     - name: Check the OS has tasks for this kind
       ansible.builtin.assert:
@@ -39,7 +39,7 @@
       when: kasm_vm.kind == 'agent'
 
     - name: Desktop and RDP for desktop templates
-      ansible.builtin.include_tasks: desktop-debian.yml
+      ansible.builtin.include_tasks: "desktop-{{ 'popos' if kasm_os.method | default('cloud-image') == 'manual-iso' else 'debian' }}.yml"
       when: kasm_vm.kind == 'desktop'
 
     - name: Clean the guest so clones start fresh

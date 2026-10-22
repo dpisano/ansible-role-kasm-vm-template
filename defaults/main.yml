@@ -75,6 +75,12 @@ kasm_template_os:
     method: iso
     family: arch
     user: "{{ kasm_omarchy_username }}"
+  # Pop!_OS ships only as an ISO: you install it by hand once and the role
+  # does the rest. desktop only (xrdp). See the README.
+  popos:
+    method: manual-iso
+    family: debian
+    user: "{{ kasm_popos_username }}"
   arch:
     family: arch
     user: arch
@@ -126,3 +132,23 @@ kasm_omarchy_install_delay: 15
 # Hide the output of tasks that handle the SSH key / cloud-init data. Turn it on when the
 # play's output is shipped somewhere other than your own terminal.
 kasm_template_no_log: false
+
+# --- Pop!_OS (os: popos) -----------------------------------------------------
+# Download link and SHA256 of the ISO you want, from https://pop.system76.com.
+# Required for os: popos. The ISO is downloaded to the node and checked.
+kasm_popos_iso_url: ""
+kasm_popos_iso_sha256: ""
+kasm_popos_iso_dir: /var/lib/vz/template/iso
+kasm_popos_iso_storage: local
+
+# The login you create in the installer. Ansible reaches the VM as this user
+# (key and passwordless sudo are added through the guest agent).
+kasm_popos_username: kasm
+
+# What xrdp starts. gnome-session is the GNOME-based Pop!_OS 22.04; COSMIC
+# (24.04) is Wayland-only and does not work with xrdp.
+kasm_popos_session_command: gnome-session
+
+# Let cloud-init configure the network on clones (Proxmox's ipconfig0). Off by
+# default: Pop!_OS uses NetworkManager and takes DHCP.
+kasm_popos_cloudinit_network: false

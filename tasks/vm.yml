@@ -20,6 +20,7 @@
     - kasm_existing.rc == 0
     - not kasm_template_rebuild | bool
     - "'template: 1' not in kasm_existing.stdout"
+    - kasm_os.method | default('cloud-image') != 'manual-iso'
 
 - name: Skip an existing template
   ansible.builtin.debug:
@@ -27,9 +28,22 @@
   when:
     - kasm_existing.rc == 0
     - not kasm_template_rebuild | bool
+    - "'template: 1' in kasm_existing.stdout"
+
+# Installed by hand from the ISO, so a VM that exists but is not a template yet
+# is the one to carry on with, not an error.
+- name: Pop!_OS, installed by hand
+  ansible.builtin.include_tasks: vm-popos.yml
+  when:
+    - kasm_os.method | default('cloud-image') == 'manual-iso'
+    - >-
+      kasm_existing.rc != 0 or 'template: 1' not in kasm_existing.stdout
+      or kasm_template_rebuild | bool
 
 - name: Build the VM
-  when: kasm_existing.rc != 0 or kasm_template_rebuild | bool
+  when:
+    - kasm_os.method | default('cloud-image') != 'manual-iso'
+    - kasm_existing.rc != 0 or kasm_template_rebuild | bool
   block:
     - name: Destroy the old VM
       ansible.builtin.shell: |
@@ -47,16 +61,4 @@
       when: kasm_os.method | default('cloud-image') == 'iso'
 
     - name: Add the VM to the in-memory build group
-      ansible.builtin.add_host:
-        name: "{{ kasm_vm.name }}"
-        groups: kasm_build
-        ansible_host: "{{ kasm_vm_ip }}"
-        ansible_user: "{{ kasm_os.user }}"
-        ansible_become: true
-        ansible_python_interpreter: /usr/bin/python3
-        ansible_ssh_common_args: >-
-          -o ProxyJump=root@{{ ansible_host | default(inventory_hostname) }}
-          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
-        kasm_vm: "{{ kasm_vm }}"
-        kasm_os: "{{ kasm_os }}"
-        kasm_pve_node: "{{ inventory_hostname }}"
+      ansible.builtin.include_tasks: add-build-host.yml
