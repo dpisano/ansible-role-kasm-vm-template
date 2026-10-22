@@ -108,7 +108,8 @@ Things to know:
   `kasm_popos_remote` forces `xrdp` or `wayvnc`; the default `auto` picks
   wayvnc when `cosmic-session` is installed.
 - A VM that exists but is not yet a template is taken as the install to
-  continue with. `-e kasm_template_rebuild=true` destroys it and starts over.
+  continue with (see "Resuming"). `-e kasm_template_rebuild=true` destroys it
+  and starts over.
 - The passwordless-sudo file stays in the template, as on the cloud images.
 - Clones keep NetworkManager's DHCP; `kasm_popos_cloudinit_network: true` lets
   cloud-init apply a clone's static ipconfig instead (untested).
@@ -116,6 +117,28 @@ Things to know:
 
 Qubes OS is not supported: it is a Xen-based OS with its own installer, no
 cloud image and no cloud-init, so it can't be cloned and provisioned this way.
+
+## Resuming
+
+A run can be repeated, and it carries on from where an earlier one stopped. For
+each template the role looks at the VM at its VMID:
+
+| VM at the VMID | What the next run does |
+|---|---|
+| none | builds it |
+| already a template | skips it |
+| tagged `kasm-provisioned`, not yet a template | only finishes it: shuts it down, fixes the drives, converts it |
+| tagged `kasm` only (provisioning did not finish) | starts it if needed, finds its address and provisions it again |
+| no `kasm` tag (not made by this role) | stops with an error |
+
+The `kasm-provisioned` tag (`kasm_template_provisioned_tag`) is set on the VM as
+the last step of provisioning, so it only exists once everything succeeded.
+Finalizing checks each step against the VM's config, so it also resumes after
+failing partway (a drive already detached, the VM already shut down). VMs that
+did not finish provisioning are left alone by the finalize phase instead of
+being converted. Provisioning again is safe for the cloud-image templates; for
+Omarchy, a run that stopped during the install itself should be rebuilt. VMs
+built before this tag existed are treated as unfinished and provisioned again.
 
 ## Variables
 
@@ -129,6 +152,7 @@ SSH key / cloud-init data (default `false`).
 
 - Needs the private key matching `kasm_template_ssh_public_key` (default
   `users[0].ssh_key` from your inventory's `group_vars/all.yml`) on the controller.
-- A leftover half-built VM at a VMID aborts the run; destroy it or pass
-  `-e kasm_template_rebuild=true`, which destroys any VM at those VMIDs.
+- `-e kasm_template_rebuild=true` destroys whatever is at the template VMIDs
+  (a template, a half-built VM, or a VM this role did not create) and builds
+  it again. A plain run never does that; see "Resuming" below.
 - The Kasm install and the Proxmox provider config in Kasm are out of scope.

@@ -1,0 +1,23 @@
+---
+# A VM this role created earlier whose provisioning did not finish (no
+# provisioned tag): start it if needed, find its address and provision it again.
+- name: Read the VM's state
+  ansible.builtin.command: qm status {{ kasm_vm.vmid }}
+  register: kasm_resume_status
+  changed_when: false
+
+- name: Start the VM
+  ansible.builtin.command: qm start {{ kasm_vm.vmid }}
+  changed_when: true
+  when: "'running' not in kasm_resume_status.stdout"
+
+- name: Find the address of a cloud-image VM
+  ansible.builtin.include_tasks: cloud-image-address.yml
+  when: kasm_os.method | default('cloud-image') == 'cloud-image'
+
+- name: Find the address of an Omarchy VM
+  ansible.builtin.include_tasks: omarchy-address.yml
+  when: kasm_os.method | default('cloud-image') == 'iso'
+
+- name: Add the VM to the in-memory build group
+  ansible.builtin.include_tasks: add-build-host.yml

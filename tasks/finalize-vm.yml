@@ -1,0 +1,80 @@
+---
+# One VM (host kasm_fin of the build group).
+- name: Read the config of {{ kasm_fin }}
+  ansible.builtin.command: qm config {{ hostvars[kasm_fin].kasm_vm.vmid }}
+  register: kasm_fin_cfg
+  changed_when: false
+
+- name: Work out how far the VM is
+  ansible.builtin.set_fact:
+    kasm_fin_provisioned: >-
+      {{ kasm_fin_cfg.stdout is search('(?m)^tags:.*\b' ~ kasm_template_provisioned_tag ~ '\b') }}
+    kasm_fin_is_template: >-
+      {{ kasm_fin_cfg.stdout is search('(?m)^template: 1') }}
+
+- name: Say why a VM is not finished
+  ansible.builtin.debug:
+    msg: >-
+      {{ kasm_fin }} (VMID {{ hostvars[kasm_fin].kasm_vm.vmid }}) is not provisioned (provisioning
+      failed or did not run), so it is left as it is. Run again to carry on.
+  when: not kasm_fin_provisioned | bool
+
+- name: Convert {{ kasm_fin }}
+  when:
+    - kasm_fin_provisioned | bool
+    - not kasm_fin_is_template | bool
+  vars:
+    kasm_fin_vm: "{{ hostvars[kasm_fin].kasm_vm }}"
+    kasm_fin_method: "{{ hostvars[kasm_fin].kasm_os.method | default('cloud-image') }}"
+    kasm_fin_user: "{{ hostvars[kasm_fin].kasm_os.user }}"
+    kasm_fin_iso: "{{ hostvars[kasm_fin].kasm_os.method | default('cloud-image') in ['iso', 'manual-iso'] }}"
+    kasm_fin_media: >-
+      {{ (['ide2'] if kasm_fin_cfg.stdout is search('(?m)^ide2:(?!.*cloudinit).*media=cdrom') else [])
+         + (['ide3'] if kasm_fin_method == 'iso' and kasm_fin_cfg.stdout is search('(?m)^ide3:') else []) }}
+  block:
+    - name: Read the VM's state
+      ansible.builtin.command: qm status {{ kasm_fin_vm.vmid }}
+      register: kasm_fin_status
+      changed_when: false
+
+    - name: Shut the VM down
+      ansible.builtin.command: qm shutdown {{ kasm_fin_vm.vmid }} --timeout 120
+      changed_when: true
+      when: "'running' in kasm_fin_status.stdout"
+
+    - name: Detach the install media
+      ansible.builtin.command: qm set {{ kasm_fin_vm.vmid }} --delete {{ kasm_fin_media | join(',') }}
+      changed_when: true
+      when: kasm_fin_iso | bool and kasm_fin_media | length > 0
+
+    - name: Add Proxmox's cloud-init drive to the ISO-installed template
+      ansible.builtin.command: >-
+        qm set {{ kasm_fin_vm.vmid }}
+        --ide2 {{ kasm_fin_vm.storage }}:cloudinit
+        --ciuser {{ kasm_fin_user }}
+        --sshkeys {{ kasm_template_sshkeys_file }}
+        --ipconfig0 ip=dhcp
+      changed_when: true
+      when: kasm_fin_iso | bool and not kasm_fin_cfg.stdout is search('(?m)^ide2:.*cloudinit')
+
+    - name: Detach build-time user-data
+      ansible.builtin.command: >-
+        qm set {{ kasm_fin_vm.vmid }}
+        --delete cicustom
+        --ciuser {{ kasm_fin_user }}
+        --sshkeys {{ kasm_template_sshkeys_file }}
+      changed_when: true
+      when: kasm_fin_method == 'cloud-image' and kasm_fin_cfg.stdout is search('(?m)^cicustom:')
+
+    - name: Convert to a template
+      ansible.builtin.command: qm template {{ kasm_fin_vm.vmid }}
+      changed_when: true
+
+- name: Remove the build-time files of {{ kasm_fin }}
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ kasm_template_snippets_dir }}/kasm-tpl-{{ hostvars[kasm_fin].kasm_vm.vmid }}.yml"
+    - "{{ kasm_omarchy_iso_dir }}/kasm-cidata-{{ hostvars[kasm_fin].kasm_vm.vmid }}.iso"
+  when: kasm_fin_provisioned | bool

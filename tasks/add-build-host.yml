@@ -1,11 +1,14 @@
 ---
 # Registers the VM (kasm_vm, kasm_os, kasm_vm_ip) as a host of the in-memory
-# build group, so the provision play can reach it through the node.
+# build group, so the provision play can reach it through the node. A VM that
+# is already provisioned (kasm_resume_provisioned) is only registered so
+# finalize can template it; the provision play skips it.
 - name: Add the VM to the in-memory build group
   ansible.builtin.add_host:
     name: "{{ kasm_vm.name }}"
     groups: kasm_build
     ansible_host: "{{ kasm_vm_ip }}"
+    ansible_connection: "{{ 'local' if kasm_resume_provisioned | default(false) | bool else 'ssh' }}"
     ansible_user: "{{ kasm_os.user }}"
     ansible_become: true
     ansible_python_interpreter: /usr/bin/python3
@@ -15,3 +18,4 @@
     kasm_vm: "{{ kasm_vm }}"
     kasm_os: "{{ kasm_os }}"
     kasm_pve_node: "{{ inventory_hostname }}"
+    kasm_provisioned: "{{ kasm_resume_provisioned | default(false) | bool }}"

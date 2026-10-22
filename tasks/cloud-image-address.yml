@@ -1,0 +1,27 @@
+---
+# Waits for the guest agent of a running cloud-image VM to report an address.
+- name: Wait for the guest agent to report an address
+  ansible.builtin.command: qm guest cmd {{ kasm_vm.vmid }} network-get-interfaces
+  register: kasm_nics
+  until: kasm_nics.rc == 0 and kasm_nics.stdout is regex(kasm_ipv4_regex)
+  retries: "{{ kasm_template_boot_retries }}"
+  delay: "{{ kasm_template_boot_delay }}"
+  changed_when: false
+  failed_when: false
+
+- name: Fail if the VM never came up
+  ansible.builtin.fail:
+    msg: >-
+      {{ kasm_vm.name }} never reported an IPv4 address. The guest agent is
+      installed by cloud-init on first boot, so look in the VM: `qm terminal
+      {{ kasm_vm.vmid }}` (log in as {{ kasm_os.user }}, key only, so use the
+      Proxmox console instead) and read /var/log/cloud-init-output.log; no
+      network (bridge, VLAN, DHCP) or a failed package install are the usual causes.
+      Then `qm destroy {{ kasm_vm.vmid }} --purge` or rerun with
+      -e kasm_template_rebuild=true.
+  when: kasm_nics.rc != 0 or kasm_nics.stdout is not regex(kasm_ipv4_regex)
+
+
+- name: Remember the VM's address
+  ansible.builtin.set_fact:
+    kasm_vm_ip: "{{ kasm_nics.stdout | regex_search(kasm_ipv4_regex, '\\1') | first }}"
