@@ -47,6 +47,12 @@
   ansible.builtin.set_fact:
     kasm_vm_mac: "{{ 'BC:24:11:%02X:%02X:%02X' | format(kasm_vm.vmid | int // 65536 % 256, kasm_vm.vmid | int // 256 % 256, kasm_vm.vmid | int % 256) }}"
 
+- name: Check no pool is set
+  ansible.builtin.assert:
+    that: kasm_vm.pool | string | length == 0
+    fail_msg: "pool is not supported for os: omarchy ({{ kasm_vm.name }}); add the VM to the pool in Proxmox afterwards"
+    quiet: true
+
 - name: Create the VM
   ansible.builtin.command:
     argv:
