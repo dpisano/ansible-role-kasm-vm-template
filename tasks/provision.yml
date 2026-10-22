@@ -39,7 +39,8 @@
       when: kasm_vm.kind == 'agent'
 
     - name: Desktop and RDP for desktop templates
-      ansible.builtin.include_tasks: "desktop-{{ 'popos' if kasm_os.method | default('cloud-image') == 'manual-iso' else 'debian' }}.yml"
+      ansible.builtin.include_tasks:
+        file: "desktop-{{ 'popos' if kasm_os.method | default('cloud-image') == 'manual-iso' else 'debian' }}.yml"
       when: kasm_vm.kind == 'desktop'
 
     - name: Clean the guest so clones start fresh
