@@ -38,6 +38,9 @@ kasm_template_snippets_dir: /var/lib/vz/snippets
 kasm_template_boot_retries: 60
 kasm_template_boot_delay: 5
 
+# Seconds to wait for cloud-init on the build VM to finish its first boot.
+kasm_template_cloud_init_timeout: 900
+
 # Docker images to pre-pull into agent templates, e.g. kasmweb/chrome:1.18.0.
 kasm_template_prepull_images: []
 

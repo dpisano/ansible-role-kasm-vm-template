@@ -4,10 +4,40 @@
   ansible.builtin.wait_for_connection:
     timeout: 300
 
+# cloud-init status --wait has no timeout of its own, so a first-boot step that
+# hangs (a package install, no network) would stall the run for good. Exit 2
+# means it finished with recoverable errors; the checks below catch what matters.
 - name: Wait for cloud-init to finish
-  ansible.builtin.command: cloud-init status --wait
+  ansible.builtin.command: timeout {{ kasm_template_cloud_init_timeout }} cloud-init status --wait
+  register: kasm_cloud_init
   changed_when: false
+  failed_when: false
   when: kasm_os.method | default('cloud-image') == 'cloud-image'
+
+- name: Show what cloud-init is doing
+  ansible.builtin.shell: |
+    cloud-init status --long
+    echo "--- /var/log/cloud-init-output.log (last 40 lines)"
+    tail -n 40 /var/log/cloud-init-output.log
+  register: kasm_cloud_init_log
+  changed_when: false
+  failed_when: false
+  when:
+    - kasm_cloud_init is not skipped
+    - kasm_cloud_init.rc not in [0, 2]
+
+- name: Fail if cloud-init did not finish
+  vars:
+    kasm_cloud_init_what: >-
+      {{ 'did not finish within ' ~ kasm_template_cloud_init_timeout ~ ' seconds'
+         if kasm_cloud_init.rc == 124 else 'failed' }}
+  ansible.builtin.fail:
+    msg: |-
+      cloud-init on {{ kasm_vm.name }} {{ kasm_cloud_init_what }}.
+      {{ kasm_cloud_init_log.stdout | default('') }}
+  when:
+    - kasm_cloud_init is not skipped
+    - kasm_cloud_init.rc not in [0, 2]
 
 - name: Gather facts
   ansible.builtin.setup:
