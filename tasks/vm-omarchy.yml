@@ -99,9 +99,10 @@
   ansible.builtin.command: qm start {{ kasm_vm.vmid }}
   changed_when: true
 
-# The live ISO runs no SSH server, so port 22 answering means the installed
-# system is up (the install enables sshd for authorized_keys).
-- name: Wait for the installed system's SSH
+# Port 22 answering only means the VM has an address: the live ISO runs sshd
+# too (it is built from Arch's releng profile). The provision play waits for a
+# login as the new user, which exists only once the install is done.
+- name: Wait for the VM's address and sshd
   ansible.builtin.shell: |
     set -o pipefail
     ip={{ kasm_vm.build_ip | default('') | quote }}

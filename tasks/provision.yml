@@ -1,8 +1,27 @@
 ---
 # Runs inside the build VM (group kasm_build).
+# An Omarchy VM answers on port 22 from the live installer too (the ISO is built
+# from Arch's releng profile, which runs sshd), so the login as the new user is
+# what shows the install is done. That takes a while: wait as long as the build
+# phase allows for the install.
 - name: Wait for SSH
-  ansible.builtin.wait_for_connection:
-    timeout: 300
+  vars:
+    kasm_ssh_timeout: >-
+      {{ kasm_omarchy_install_retries | int * kasm_omarchy_install_delay | int
+         if kasm_os.method | default('cloud-image') == 'iso' else 300 }}
+  block:
+    - name: Wait for a login as the build user
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ kasm_ssh_timeout }}"
+  rescue:
+    - name: Fail with what to check
+      ansible.builtin.fail:
+        msg: >-
+          No SSH login as {{ kasm_os.user }} on {{ kasm_vm.name }} after {{ kasm_ssh_timeout }} seconds.
+          {{ 'The installer may still be running, may not have loaded the cidata drive (it would then show its
+          interactive wizard), or the VM may have a new address after rebooting (set build_ip on the template). Look at the VM console in Proxmox.'
+          if kasm_os.method | default('cloud-image') == 'iso'
+          else 'Check the VM console in Proxmox and /var/log/cloud-init-output.log.' }}
 
 # cloud-init status --wait has no timeout of its own, so a first-boot step that
 # hangs (a package install, no network) would stall the run for good. Exit 2
