@@ -55,7 +55,14 @@
 
 - name: Fail if the VM never came up
   ansible.builtin.fail:
-    msg: "{{ kasm_vm.name }} never reported an IPv4 address; check `qm terminal {{ kasm_vm.vmid }}`"
+    msg: >-
+      {{ kasm_vm.name }} never reported an IPv4 address. The guest agent is
+      installed by cloud-init on first boot, so look in the VM: `qm terminal
+      {{ kasm_vm.vmid }}` (log in as {{ kasm_os.user }}, key only, so use the
+      Proxmox console instead) and read /var/log/cloud-init-output.log; no
+      network (bridge, VLAN, DHCP) or a failed package install are the usual causes.
+      Then `qm destroy {{ kasm_vm.vmid }} --purge` or rerun with
+      -e kasm_template_rebuild=true.
   when: kasm_nics.rc != 0 or kasm_nics.stdout is not regex(kasm_ipv4_regex)
 
 
