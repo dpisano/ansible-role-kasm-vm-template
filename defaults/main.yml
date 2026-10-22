@@ -43,32 +43,33 @@ kasm_template_prepull_images: []
 
 # Cloud images. family picks the package-manager tasks (debian or arch); user
 # is the image's default login; agent_install runs from cloud-init on first
-# boot so the guest agent is up before Ansible connects.
+# boot so the guest agent is up before Ansible connects. Debian's cloud images
+# ship without apt package lists, so apt-get update has to come first.
 kasm_template_os:
   ubuntu-2404:
     family: debian
     user: ubuntu
     url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
     file: ubuntu-2404-cloudimg-amd64.qcow2
-    agent_install: apt-get install -y qemu-guest-agent
+    agent_install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent
   ubuntu-2204:
     family: debian
     user: ubuntu
     url: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
     file: ubuntu-2204-cloudimg-amd64.qcow2
-    agent_install: apt-get install -y qemu-guest-agent
+    agent_install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent
   debian-12:
     family: debian
     user: debian
     url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
     file: debian-12-genericcloud-amd64.qcow2
-    agent_install: apt-get install -y qemu-guest-agent
+    agent_install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent
   debian-13:
     family: debian
     user: debian
     url: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
     file: debian-13-genericcloud-amd64.qcow2
-    agent_install: apt-get install -y qemu-guest-agent
+    agent_install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent
   # Omarchy has no cloud image: it is installed unattended from its ISO. See
   # the README. desktop only (wayvnc, for a Kasm VNC server connection).
   omarchy:
