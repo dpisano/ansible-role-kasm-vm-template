@@ -33,6 +33,7 @@ set those on the clone or in Kasm's autoscale config.
 | `debian-12`, `debian-13` | Debian genericcloud | yes | yes |
 | `arch` | Arch Linux cloud image | yes | no (xrdp is AUR-only) |
 | `omarchy` | Omarchy ISO, unattended | no | yes (wayvnc) |
+| `popos` | Pop!_OS ISO, installed by hand | no | yes (xrdp) |
 
 To add an OS, add an entry to `kasm_template_os` with its image URL, default
 user, and a command that installs the guest agent. If it needs a new package
@@ -73,6 +74,37 @@ Things to know:
 - Hyprland needs GPU acceleration or software rendering. The VM uses
   `--vga virtio`; set `vga: virtio-gl` on the template for virgl if the node
   has the GL libraries.
+
+## Pop!_OS
+
+System76 ships Pop!_OS only as an ISO, with no cloud image and no documented
+unattended install, so `os: popos` has a manual step. It is `kind: desktop`
+only, and the role runs twice:
+
+1. Set `kasm_popos_iso_url` and `kasm_popos_iso_sha256` (link and SHA256 from
+   [pop.system76.com](https://pop.system76.com)) and `kasm_popos_username`,
+   then run. The role downloads and verifies the ISO, creates the VM with it
+   attached (in `pool` if you set one) and starts it. It builds nothing else
+   for that template yet.
+2. In the VM's Proxmox console, install Pop!_OS with the user
+   `kasm_popos_username` (disk encryption off), then in the new system run
+   `sudo apt install -y qemu-guest-agent && sudo reboot`.
+3. Run again. The role finds the VM, uses the guest agent (as root) to install
+   sshd, authorize `kasm_template_ssh_public_key` and allow passwordless sudo
+   for that user, then provisions it like the other desktops: xrdp with a
+   `gnome-session` login, cloud-init for clones, a clean-up, and `qm template`.
+
+Things to know:
+
+- Use the GNOME-based **Pop!_OS 22.04**. COSMIC (24.04+) is Wayland-only and
+  has no xrdp session; the role stops with a message if `gnome-session` is
+  missing (set `kasm_popos_session_command` for another X11 session).
+- A VM that exists but is not yet a template is taken as the install to
+  continue with. `-e kasm_template_rebuild=true` destroys it and starts over.
+- The passwordless-sudo file stays in the template, as on the cloud images.
+- Clones keep NetworkManager's DHCP; `kasm_popos_cloudinit_network: true` lets
+  cloud-init apply a clone's static ipconfig instead (untested).
+- Untested on a real node: the xrdp login to Pop's GNOME session.
 
 Qubes OS is not supported: it is a Xen-based OS with its own installer, no
 cloud image and no cloud-init, so it can't be cloned and provisioned this way.

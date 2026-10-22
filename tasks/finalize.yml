@@ -6,15 +6,17 @@
   when: hostvars[item].kasm_pve_node == inventory_hostname
   changed_when: true
 
-- name: Detach the Omarchy install media
-  ansible.builtin.command: qm set {{ hostvars[item].kasm_vm.vmid }} --delete ide2,ide3
+- name: Detach the install media
+  ansible.builtin.command: >-
+    qm set {{ hostvars[item].kasm_vm.vmid }}
+    --delete ide2{{ ',ide3' if hostvars[item].kasm_os.method | default('cloud-image') == 'iso' else '' }}
   loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
   when:
     - hostvars[item].kasm_pve_node == inventory_hostname
-    - hostvars[item].kasm_os.method | default('cloud-image') == 'iso'
+    - hostvars[item].kasm_os.method | default('cloud-image') in ['iso', 'manual-iso']
   changed_when: true
 
-- name: Add Proxmox's cloud-init drive to the Omarchy template
+- name: Add Proxmox's cloud-init drive to the ISO-installed template
   ansible.builtin.command: >-
     qm set {{ hostvars[item].kasm_vm.vmid }}
     --ide2 {{ hostvars[item].kasm_vm.storage }}:cloudinit
@@ -24,7 +26,7 @@
   loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
   when:
     - hostvars[item].kasm_pve_node == inventory_hostname
-    - hostvars[item].kasm_os.method | default('cloud-image') == 'iso'
+    - hostvars[item].kasm_os.method | default('cloud-image') in ['iso', 'manual-iso']
   changed_when: true
 
 - name: Detach build-time user-data

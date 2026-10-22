@@ -1,0 +1,168 @@
+---
+# os: popos. System76 ships Pop!_OS only as an ISO, with no cloud image and no
+# unattended install, so the install itself is by hand and the role runs twice:
+#   1st run  creates the VM with the ISO attached and starts it.
+#   by hand  install Pop!_OS from the Proxmox console as kasm_popos_username,
+#            then in the new system:  sudo apt install qemu-guest-agent
+#            and reboot.
+#   2nd run  finds the VM, reaches it through the guest agent (adds sshd, your
+#            key and passwordless sudo), and carries on to provisioning.
+- name: Check the Pop!_OS settings
+  ansible.builtin.assert:
+    that:
+      - kasm_vm.kind == 'desktop'
+      - kasm_popos_username | length > 0
+    fail_msg: "{{ kasm_vm.name }}: os: popos is kind: desktop only and needs kasm_popos_username"
+    quiet: true
+
+- name: Destroy the old VM
+  ansible.builtin.shell: |
+    qm stop {{ kasm_vm.vmid }} --skiplock 2>/dev/null || true
+    qm destroy {{ kasm_vm.vmid }} --purge
+  changed_when: true
+  when: kasm_existing.rc == 0 and kasm_template_rebuild | bool
+
+- name: Work out whether the install is done
+  ansible.builtin.set_fact:
+    kasm_popos_adopt: "{{ kasm_existing.rc == 0 and not kasm_template_rebuild | bool }}"
+
+# --- first run ---------------------------------------------------------------
+- name: Create the VM and start the installer
+  when: not kasm_popos_adopt
+  block:
+    - name: Check the ISO settings
+      ansible.builtin.assert:
+        that:
+          - kasm_popos_iso_url | length > 0
+          - kasm_popos_iso_sha256 | length > 0
+        fail_msg: >-
+          os: popos needs kasm_popos_iso_url and kasm_popos_iso_sha256 (the
+          download link and SHA256 from https://pop.system76.com). See the role README.
+        quiet: true
+
+    - name: Download the Pop!_OS ISO, verified against its checksum
+      ansible.builtin.get_url:
+        url: "{{ kasm_popos_iso_url }}"
+        dest: "{{ kasm_popos_iso_dir }}/{{ kasm_popos_iso_url | urlsplit('path') | basename }}"
+        checksum: "sha256:{{ kasm_popos_iso_sha256 }}"
+        mode: "0644"
+
+    - name: Create the VM
+      vars:
+        kasm_pool_args: "{{ ['--pool', kasm_vm.pool | string] if kasm_vm.pool | string else [] }}"
+        kasm_popos_create_args:
+          - qm
+          - create
+          - "{{ kasm_vm.vmid }}"
+          - --name
+          - "{{ kasm_vm.name }}"
+          - --ostype
+          - l26
+          - --bios
+          - ovmf
+          - --machine
+          - q35
+          - --cpu
+          - host
+          - --cores
+          - "{{ kasm_vm.cores }}"
+          - --memory
+          - "{{ kasm_vm.memory }}"
+          - --scsihw
+          - virtio-scsi-single
+          - --efidisk0
+          - "{{ kasm_vm.storage }}:0,efitype=4m,pre-enrolled-keys=0"
+          - --scsi0
+          - "{{ kasm_vm.storage }}:{{ kasm_vm.disk }},discard=on,iothread=1"
+          - --net0
+          - "virtio,bridge={{ kasm_vm.bridge }}{{ ',tag=' ~ kasm_vm.vlan if kasm_vm.vlan | string else '' }}"
+          - --vga
+          - virtio
+          - --agent
+          - enabled=1
+          - --ide2
+          - "{{ kasm_popos_iso_storage }}:iso/{{ kasm_popos_iso_url | urlsplit('path') | basename }},media=cdrom"
+          - --boot
+          - order=scsi0;ide2
+          - --tags
+          - kasm
+      ansible.builtin.command:
+        argv: "{{ kasm_popos_create_args + kasm_pool_args }}"
+      changed_when: true
+
+    - name: Start the VM
+      ansible.builtin.command: qm start {{ kasm_vm.vmid }}
+      changed_when: true
+
+    - name: Say what to do by hand
+      ansible.builtin.debug:
+        msg:
+          - "{{ kasm_vm.name }} (VMID {{ kasm_vm.vmid }}) is running the Pop!_OS installer. It is NOT part of this run."
+          - "1. Open the VM's console in Proxmox and install Pop!_OS. Create the user '{{ kasm_popos_username }}' and leave disk encryption off."
+          - "2. In the new system run: sudo apt install -y qemu-guest-agent && sudo reboot"
+          - "3. Run this playbook again."
+
+# --- second run --------------------------------------------------------------
+- name: Take over the installed system
+  when: kasm_popos_adopt
+  block:
+    - name: Ping the guest agent
+      ansible.builtin.command: qm agent {{ kasm_vm.vmid }} ping
+      register: kasm_popos_ping
+      changed_when: false
+      failed_when: false
+
+    - name: Say the install is not finished
+      ansible.builtin.debug:
+        msg: >-
+          {{ kasm_vm.name }} (VMID {{ kasm_vm.vmid }}) exists but its guest agent does
+          not answer. Finish the Pop!_OS install, run
+          `sudo apt install -y qemu-guest-agent && sudo reboot` in it, and run
+          this again. (Use -e kasm_template_rebuild=true to start over.)
+      when: kasm_popos_ping.rc != 0
+
+    - name: Reach the installed system
+      when: kasm_popos_ping.rc == 0
+      block:
+        # Through the guest agent, as root, so nothing has to be typed in the VM.
+        - name: Install sshd, authorize the key and allow passwordless sudo
+          ansible.builtin.command:
+            argv:
+              - qm
+              - guest
+              - exec
+              - "{{ kasm_vm.vmid }}"
+              - --timeout
+              - "600"
+              - --
+              - /bin/sh
+              - -ec
+              - |
+                DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
+                systemctl enable --now ssh
+                home=$(getent passwd {{ kasm_popos_username }} | cut -d: -f6)
+                install -d -m 700 -o {{ kasm_popos_username }} -g {{ kasm_popos_username }} "$home/.ssh"
+                touch "$home/.ssh/authorized_keys"
+                grep -qxF '{{ kasm_template_ssh_public_key }}' "$home/.ssh/authorized_keys" \
+                  || echo '{{ kasm_template_ssh_public_key }}' >> "$home/.ssh/authorized_keys"
+                chown {{ kasm_popos_username }}:{{ kasm_popos_username }} "$home/.ssh/authorized_keys"
+                chmod 600 "$home/.ssh/authorized_keys"
+                echo '{{ kasm_popos_username }} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-kasm
+                chmod 440 /etc/sudoers.d/90-kasm
+          changed_when: true
+          no_log: "{{ kasm_template_no_log }}"
+
+        - name: Read the VM's address from the guest agent
+          ansible.builtin.command: qm guest cmd {{ kasm_vm.vmid }} network-get-interfaces
+          register: kasm_nics
+          until: kasm_nics.rc == 0 and kasm_nics.stdout is regex(kasm_ipv4_regex)
+          retries: "{{ kasm_template_boot_retries }}"
+          delay: "{{ kasm_template_boot_delay }}"
+          changed_when: false
+
+        - name: Remember the VM's address
+          ansible.builtin.set_fact:
+            kasm_vm_ip: "{{ kasm_nics.stdout | regex_search(kasm_ipv4_regex, '\\1') | first }}"
+
+        - name: Add the VM to the in-memory build group
+          ansible.builtin.include_tasks: add-build-host.yml
