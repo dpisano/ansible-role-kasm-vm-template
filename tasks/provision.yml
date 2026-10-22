@@ -15,9 +15,15 @@
       {{ kasm_omarchy_install_retries | int * kasm_omarchy_install_delay | int
          if kasm_os.method | default('cloud-image') == 'iso' else 300 }}
   block:
+    # Without sudo: the check must only prove the login works. Omarchy asks for
+    # a sudo password, and a check that needed one would retry silently until
+    # the timeout. ansible_become is a connection variable, which wins over a
+    # task's become keyword, so it is switched off as a variable.
     - name: Wait for a login as the build user
       ansible.builtin.wait_for_connection:
         timeout: "{{ kasm_ssh_timeout }}"
+      vars:
+        ansible_become: false
   rescue:
     - name: Fail with what to check
       ansible.builtin.fail:
@@ -27,6 +33,29 @@
           interactive wizard), or the VM may have a new address after rebooting (set build_ip on the template). Look at the VM console in Proxmox.'
           if kasm_os.method | default('cloud-image') == 'iso'
           else 'Check the VM console in Proxmox and /var/log/cloud-init-output.log.' }}
+
+# Omarchy's installer leaves the user without passwordless sudo, so the login
+# password is given to sudo as the become password.
+- name: Use the login password for sudo
+  ansible.builtin.set_fact:
+    ansible_become_password: "{{ kasm_omarchy_password }}"
+  no_log: true
+  when:
+    - kasm_os.method | default('cloud-image') == 'iso'
+    - kasm_omarchy_password | length > 0
+
+- name: Check sudo works
+  block:
+    - name: Run a command with sudo
+      ansible.builtin.command: "true"
+      changed_when: false
+  rescue:
+    - name: Fail with how to fix sudo
+      ansible.builtin.fail:
+        msg: >-
+          sudo does not work for {{ kasm_os.user }} on {{ kasm_vm.name }}: it needs a password, or the
+          one given is wrong. Set kasm_omarchy_password to the plaintext of the password behind
+          kasm_omarchy_password_hash so the role can give it to sudo.
 
 # cloud-init status --wait has no timeout of its own, so a first-boot step that
 # hangs (a package install, no network) would stall the run for good. Exit 2

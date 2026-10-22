@@ -120,6 +120,10 @@ kasm_omarchy_config_file: "{{ playbook_dir }}/files/omarchy/user_configuration.j
 # root's password hash, as the installer does.
 kasm_omarchy_username: omarchy
 kasm_omarchy_password_hash: ""
+# The plaintext behind that hash. Omarchy's installer leaves the login without
+# passwordless sudo, so the role gives it to sudo as the become password while it
+# provisions. Required for os: omarchy unless sudo already works without one.
+kasm_omarchy_password: ""
 
 # wayvnc, started with the graphical session. Kasm connects to this port as a
 # VNC server. Auth is wayvnc's username/password over TLS; the certificate is
