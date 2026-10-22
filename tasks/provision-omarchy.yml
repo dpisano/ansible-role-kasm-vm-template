@@ -117,7 +117,7 @@
   changed_when: true
 
 # sshd regenerates its host keys on start (sshdgenkeys.service); an empty
-# machine-id is refilled on the next boot.
+# machine-id is refilled on the next boot. A server keeps its own.
 - name: Reset machine-id and SSH host keys
   ansible.builtin.shell: |
     cloud-init clean --logs
@@ -125,3 +125,4 @@
     rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_*
     rm -f /root/.bash_history /home/*/.bash_history
   changed_when: true
+  when: not kasm_vm.server | default(false) | bool

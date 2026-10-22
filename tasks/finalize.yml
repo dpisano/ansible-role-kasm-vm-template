@@ -1,7 +1,8 @@
 ---
-# Runs on the Proxmox node: shuts down and converts each provisioned VM. Every
-# step looks at the VM's config first, so it can be run again after a failure
-# partway through.
+# Runs on the Proxmox node: shuts down and converts each provisioned template,
+# or finishes each provisioned server (leaves it running, see finalize-server.yml).
+# Every step looks at the VM's config first, so it can be run again after a
+# failure partway through.
 # qm set --sshkeys takes the path of a file holding the key(s), not the key.
 - name: Write the SSH key to a file for qm
   ansible.builtin.copy:
@@ -10,7 +11,7 @@
     mode: "0600"
 
 - name: Finish each VM
-  ansible.builtin.include_tasks: finalize-vm.yml
+  ansible.builtin.include_tasks: "{{ 'finalize-server.yml' if hostvars[kasm_fin].kasm_vm.server | default(false) | bool else 'finalize-vm.yml' }}"
   loop: "{{ groups.get('kasm_build', []) | select('in', hostvars) | list }}"
   loop_control:
     loop_var: kasm_fin

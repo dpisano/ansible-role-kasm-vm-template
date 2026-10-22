@@ -1,12 +1,12 @@
 ---
-# Once per run, on the Proxmox node, when any template is os: omarchy.
+# Once per run, on the Proxmox node, when any template or server is os: omarchy.
 - name: Check the Omarchy settings
   ansible.builtin.assert:
     that:
       - kasm_omarchy_version | length > 0
       - kasm_omarchy_password_hash | length > 0
       - kasm_omarchy_vnc_password | length > 0
-      - (kasm_templates | selectattr('os', 'eq', 'omarchy') | map(attribute='kind', default='desktop') | unique | list) in [['desktop'], []]
+      - (kasm_builds | selectattr('os', 'eq', 'omarchy') | map(attribute='kind', default='desktop') | unique | list) in [['desktop'], []]
       - (lookup('file', kasm_omarchy_config_file) | from_json).disk_config.disk_encryption is not defined
     fail_msg: >-
       os: omarchy needs kasm_omarchy_version, kasm_omarchy_password_hash and

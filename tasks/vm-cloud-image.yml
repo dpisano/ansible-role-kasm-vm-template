@@ -17,7 +17,8 @@
     --net0 virtio,bridge={{ kasm_vm.bridge }}{{ ',tag=' ~ kasm_vm.vlan if kasm_vm.vlan | string else '' }}
     --agent enabled=1
     --serial0 socket --vga serial0
-    --ipconfig0 ip=dhcp
+    --ipconfig0 {{ ('ip=' ~ kasm_vm.ip ~ (',gw=' ~ kasm_vm.gateway if kasm_vm.gateway | string else '')) if kasm_vm.ip | string else 'ip=dhcp' }}
+    {{ '--nameserver ' ~ kasm_vm.dns if kasm_vm.dns | string else '' }}
     --tags kasm
     {{ '--pool ' ~ kasm_vm.pool if kasm_vm.pool | string else '' }}
   changed_when: true

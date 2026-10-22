@@ -1,9 +1,10 @@
 ---
-# Decides what to do with one template from the VM's state in Proxmox:
+# Decides what to do with one template or server from the VM's state in Proxmox:
 #   absent       build it from scratch
-#   template     nothing to do
+#   template     nothing to do (a template); an error for a server, which is
+#                never a template
 #   provisioned  built and provisioned earlier (tag kasm-provisioned), not yet a
-#                template: only finalize is left
+#                template (or, for a server, not yet finished): only finalize is left
 #   partial      created by this role (tag kasm) but provisioning did not finish:
 #                start it and provision it again
 #   foreign      not ours (no kasm tag): refuse, unless kasm_template_rebuild
@@ -35,10 +36,18 @@
       or set kasm_template_rebuild=true.
   when: kasm_vm_state == 'foreign' and not kasm_template_rebuild | bool
 
+- name: Refuse a template where a server should be
+  ansible.builtin.fail:
+    msg: >-
+      VMID {{ kasm_vm.vmid }} is a template, but {{ kasm_vm.name }} is a server (kasm_servers),
+      which is a running VM. Pick another VMID, or remove it with `qm destroy {{ kasm_vm.vmid }}`
+      or set kasm_template_rebuild=true.
+  when: kasm_vm_state == 'template' and kasm_vm.server | bool and not kasm_template_rebuild | bool
+
 - name: Skip an existing template
   ansible.builtin.debug:
     msg: "{{ kasm_vm.name }} (VMID {{ kasm_vm.vmid }}) is already a template, skipping"
-  when: kasm_vm_state == 'template' and not kasm_template_rebuild | bool
+  when: kasm_vm_state == 'template' and not kasm_vm.server | bool and not kasm_template_rebuild | bool
 
 - name: Carry on from a VM that is already provisioned
   ansible.builtin.include_tasks: add-build-host.yml
