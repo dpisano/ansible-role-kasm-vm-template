@@ -106,9 +106,25 @@
 - name: Take over the installed system
   when: kasm_popos_adopt
   block:
+    # A VM an earlier run shut down (finalize stops it) has to be started, and
+    # its guest agent given time to come up. One that is already running is
+    # asked once: its agent either answers or the install is not done.
+    - name: Read the VM's state
+      ansible.builtin.command: qm status {{ kasm_vm.vmid }}
+      register: kasm_popos_status
+      changed_when: false
+
+    - name: Start the VM
+      ansible.builtin.command: qm start {{ kasm_vm.vmid }}
+      changed_when: true
+      when: "'running' not in kasm_popos_status.stdout"
+
     - name: Ping the guest agent
       ansible.builtin.command: qm agent {{ kasm_vm.vmid }} ping
       register: kasm_popos_ping
+      until: kasm_popos_ping.rc == 0
+      retries: "{{ kasm_template_boot_retries if 'running' not in kasm_popos_status.stdout else 1 }}"
+      delay: "{{ kasm_template_boot_delay }}"
       changed_when: false
       failed_when: false
 
