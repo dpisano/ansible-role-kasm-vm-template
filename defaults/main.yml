@@ -6,6 +6,10 @@
 #   kind                  agent (Docker host for Kasm autoscaling) or
 #                         desktop (full-VM desktop with RDP, for Kasm servers)
 #   cores, memory (MiB), disk (GiB), storage, bridge, vlan
+#   pool                  Proxmox resource pool to create the VM in. Kasm's
+#                         Proxmox autoscale provider needs its templates in
+#                         the pool it is configured with. The pool must exist. Not
+#                         supported for os: omarchy.
 kasm_templates: []
 
 kasm_template_defaults:
@@ -16,6 +20,7 @@ kasm_template_defaults:
   storage: local-lvm
   bridge: vmbr0
   vlan: ""
+  pool: ""
 
 # Rebuild a VMID that already exists as a template: destroys it first.
 kasm_template_rebuild: false
