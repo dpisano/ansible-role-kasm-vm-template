@@ -63,6 +63,10 @@ Things to know:
 - The build VM's address is found by scanning the bridge's subnet for its MAC
   (installs `nmap` on the node); give the template `build_ip` to skip that.
   Port 22 answering is taken to mean the install finished.
+- Omarchy's installer leaves the login without passwordless sudo, so set
+  `kasm_omarchy_password` (the plaintext behind `kasm_omarchy_password_hash`);
+  the role gives it to sudo while provisioning, and stops with a clear message
+  if sudo still does not work.
 - Omarchy is not upgraded during the build (use `omarchy-update`). Clones
   get their hostname, user and SSH key from cloud-init, but share the
   template's wayvnc certificate. Networking stays with NetworkManager (DHCP);
