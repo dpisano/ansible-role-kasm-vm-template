@@ -19,7 +19,35 @@
     groups: ssl-cert
     append: true
 
-- name: Enable xrdp
+- name: Enable and start xrdp
   ansible.builtin.systemd:
     name: xrdp
     enabled: true
+    state: started
+
+# A server has no Kasm startup script to make its RDP login, so the role does:
+# Kasm's Static Credentials are this user and password.
+- name: Create the RDP login of a server
+  when: kasm_vm.server | default(false) | bool
+  block:
+    - name: Check the login password is set
+      ansible.builtin.assert:
+        that: kasm_server_login_password | length > 0
+        fail_msg: "{{ kasm_vm.name }}: set kasm_server_login_password, the password Kasm logs in to RDP with"
+        quiet: true
+
+    - name: Create the login
+      ansible.builtin.user:
+        name: "{{ kasm_server_login_user }}"
+        shell: /bin/bash
+        password: "{{ kasm_server_login_password | password_hash('sha512', rounds=5000) }}"
+        update_password: on_create
+      no_log: "{{ kasm_template_no_log }}"
+
+    - name: Start XFCE for the login's RDP sessions
+      ansible.builtin.copy:
+        content: "xfce4-session\n"
+        dest: "/home/{{ kasm_server_login_user }}/.xsession"
+        owner: "{{ kasm_server_login_user }}"
+        group: "{{ kasm_server_login_user }}"
+        mode: "0644"

@@ -1,6 +1,8 @@
 ---
 # Runs inside the build VM (group kasm_build).
 # A VM provisioned by an earlier run (tag kasm-provisioned) only needs finalizing.
+# A server (kasm_vm.server) is provisioned the same way as a template, except it
+# is not cleaned for cloning: it keeps its machine-id and SSH host keys.
 - name: Skip a VM that is already provisioned
   ansible.builtin.meta: end_host
   when: kasm_provisioned | default(false) | bool
@@ -136,9 +138,10 @@
         rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_*
         rm -f /root/.bash_history /home/*/.bash_history
       changed_when: true
+      when: not kasm_vm.server | default(false) | bool
 
 # The marker for finalize and for a later run: this VM is provisioned and only
-# needs to be shut down and converted. Set on the Proxmox node (the VM itself
+# needs to be shut down and converted (a template) or finished (a server). Set on the Proxmox node (the VM itself
 # can't), and last, so it only exists when everything above succeeded.
 - name: Mark the VM as provisioned
   ansible.builtin.command:

@@ -1,10 +1,10 @@
 ---
-# Kasm VM templates to build. A template is built once; if the VMID is already
-# a template it is skipped. Keys (anything left out comes from
-# kasm_template_defaults):
+# Kasm VM templates to build: Docker hosts for Kasm's Proxmox autoscale
+# provider. A template is built once; if the VMID is already a template it is
+# skipped. Keys (anything left out comes from kasm_template_defaults):
 #   name, vmid, os        required; os is a key of kasm_template_os
-#   kind                  agent (Docker host for Kasm autoscaling) or
-#                         desktop (full-VM desktop with RDP, for Kasm servers)
+#   kind                  agent (the only kind a template can be; desktops are
+#                         servers, below)
 #   cores, memory (MiB), disk (GiB), storage, bridge, vlan
 #   pool                  Proxmox resource pool to create the VM in. Kasm's
 #                         Proxmox autoscale provider needs its templates in
@@ -12,8 +12,28 @@
 #                         supported for os: omarchy.
 kasm_templates: []
 
+# Linux desktop servers to build. Same flow as a template (create the VM,
+# provision it over SSH) but it stops there: the VM is not shut down or
+# converted, it is left running, and you add it to Kasm by hand as a server
+# (Infrastructure > Servers). Keys are the template keys, plus:
+#   ip, gateway, dns      static address for a cloud-image server (ip is a CIDR,
+#                         e.g. 192.168.1.50/24). Left out, the server takes DHCP;
+#                         give it a reservation, because Kasm connects by address.
+#                         Not used for os: omarchy or popos (DHCP only).
+# kind is always desktop. For os: ubuntu-*/debian-* the role also creates the
+# RDP login (kasm_server_login_user / kasm_server_login_password).
+kasm_servers: []
+
+# Every VM this role builds, templates and servers together. The role reads this.
+kasm_builds: >-
+  {{ kasm_templates + (kasm_servers | map('combine', {'kind': 'desktop', 'server': true}) | list) }}
+
 kasm_template_defaults:
   kind: agent
+  server: false
+  ip: ""
+  gateway: ""
+  dns: ""
   cores: 4
   memory: 4096
   disk: 40
@@ -26,8 +46,16 @@ kasm_template_defaults:
 # later run can finish it (shut down, convert to a template) without redoing it.
 kasm_template_provisioned_tag: kasm-provisioned
 
-# Rebuild a VMID that already exists, as a template or half-built: destroys it first.
+# Rebuild a VMID that already exists, as a template, a server or half-built:
+# destroys it first.
 kasm_template_rebuild: false
+
+# The RDP login the role creates on cloud-image servers (Kasm's Connection
+# Username / Password for the server). Set the password; it is hashed on the
+# controller, and only applied when the account is created. Not used for
+# Omarchy or Pop!_OS, which log in with their own user and VNC password.
+kasm_server_login_user: kasm
+kasm_server_login_password: ""
 
 # Public key authorized on the build VM; the controller must hold the private
 # half. The key stays in the template, so clones accept it too.

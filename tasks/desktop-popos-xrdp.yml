@@ -40,7 +40,8 @@
     groups: ssl-cert
     append: true
 
-- name: Enable xrdp
+- name: Enable and start xrdp
   ansible.builtin.systemd:
     name: xrdp
     enabled: true
+    state: started

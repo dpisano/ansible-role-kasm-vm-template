@@ -1,0 +1,97 @@
+---
+# One server (host kasm_fin of the build group). Unlike a template it is not
+# converted: it is left running, ready for you to add to Kasm. All that is left
+# to do is detach the install media of an ISO-installed server (the VM is
+# restarted for that), keep the cloud-init user-data a cloud-image server boots
+# from, and report the address.
+- name: Read the config of {{ kasm_fin }}
+  ansible.builtin.command: qm config {{ hostvars[kasm_fin].kasm_vm.vmid }}
+  register: kasm_fin_cfg
+  changed_when: false
+
+- name: Work out how far the server is
+  ansible.builtin.set_fact:
+    kasm_fin_provisioned: >-
+      {{ kasm_fin_cfg.stdout is search('(?m)^tags:.*\b' ~ kasm_template_provisioned_tag ~ '\b') }}
+
+- name: Say why a server is not finished
+  ansible.builtin.debug:
+    msg: >-
+      {{ kasm_fin }} (VMID {{ hostvars[kasm_fin].kasm_vm.vmid }}) is not provisioned (provisioning
+      failed or did not run), so it is left as it is. Run again to carry on.
+  when: not kasm_fin_provisioned | bool
+
+- name: Finish {{ kasm_fin }}
+  when: kasm_fin_provisioned | bool
+  vars:
+    kasm_fin_vm: "{{ hostvars[kasm_fin].kasm_vm }}"
+    kasm_fin_method: "{{ hostvars[kasm_fin].kasm_os.method | default('cloud-image') }}"
+    kasm_fin_media: >-
+      {{ (['ide2'] if kasm_fin_cfg.stdout is search('(?m)^ide2:(?!.*cloudinit).*media=cdrom') else [])
+         + (['ide3'] if kasm_fin_method == 'iso' and kasm_fin_cfg.stdout is search('(?m)^ide3:') else []) }}
+  block:
+    - name: Read the server's state
+      ansible.builtin.command: qm status {{ kasm_fin_vm.vmid }}
+      register: kasm_fin_status
+      changed_when: false
+
+    # The ISO installs left their media attached. Eject it for good, which needs
+    # the VM off, then boot it from its disk: that also starts what runs with the
+    # graphical session (wayvnc).
+    - name: Shut the server down to detach its install media
+      ansible.builtin.command: qm shutdown {{ kasm_fin_vm.vmid }} --timeout 120
+      changed_when: true
+      when: kasm_fin_media | length > 0 and 'running' in kasm_fin_status.stdout
+
+    - name: Detach the install media and boot from the disk
+      ansible.builtin.command: qm set {{ kasm_fin_vm.vmid }} --delete {{ kasm_fin_media | join(',') }} --boot order=scsi0
+      changed_when: true
+      when: kasm_fin_media | length > 0
+
+    - name: Start the server
+      ansible.builtin.command: qm start {{ kasm_fin_vm.vmid }}
+      changed_when: true
+      when: kasm_fin_media | length > 0 or 'running' not in kasm_fin_status.stdout
+
+    # Only to report it: a slow first boot must not fail the run, the server is
+    # built. The address Kasm connects to is the one to give a DHCP reservation.
+    - name: Look for the server's address
+      ansible.builtin.command: qm guest cmd {{ kasm_fin_vm.vmid }} network-get-interfaces
+      register: kasm_fin_nics
+      until: kasm_fin_nics.rc == 0 and kasm_fin_nics.stdout is regex(kasm_ipv4_regex)
+      retries: "{{ kasm_template_boot_retries }}"
+      delay: "{{ kasm_template_boot_delay }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Say how to reach {{ kasm_fin }}
+      vars:
+        kasm_fin_ip: >-
+          {{ (kasm_fin_nics.stdout | regex_search(kasm_ipv4_regex, '\1') | first)
+             if kasm_fin_nics.rc == 0 and kasm_fin_nics.stdout is regex(kasm_ipv4_regex)
+             else 'not reported yet: read it from the VM in Proxmox' }}
+        kasm_fin_os: "{{ kasm_fin_vm.os }}"
+        kasm_fin_popos_vnc: "{{ hostvars[kasm_fin].kasm_popos_remote_mode | default('') == 'wayvnc' }}"
+        kasm_fin_texts:
+          - "VNC, port {{ kasm_omarchy_vnc_port }}, username {{ kasm_omarchy_vnc_user }}, the VNC password"
+          - "VNC, port {{ kasm_popos_vnc_port }}, username {{ kasm_popos_vnc_user }}, the VNC password"
+          - "RDP, port 3389, the Pop!_OS login {{ kasm_popos_username }}"
+          - "RDP, port 3389, username {{ kasm_server_login_user }}"
+        kasm_fin_pick: >-
+          {{ 0 if kasm_fin_os == 'omarchy'
+             else 1 if kasm_fin_os == 'popos' and kasm_fin_popos_vnc | bool
+             else 2 if kasm_fin_os == 'popos'
+             else 3 }}
+        kasm_fin_remote: "{{ kasm_fin_texts[kasm_fin_pick | int] }}"
+      ansible.builtin.debug:
+        msg: >-
+          {{ kasm_fin }} (VMID {{ kasm_fin_vm.vmid }}) is ready and running. Add it to Kasm as a server:
+          address {{ kasm_fin_ip }}, {{ kasm_fin_remote }}.
+
+# A cloud-image server boots from the snippet (cicustom) it was created with, so
+# only the Omarchy cidata drive, detached above, is a build-time file to remove.
+- name: Remove the build-time files of {{ kasm_fin }}
+  ansible.builtin.file:
+    path: "{{ kasm_omarchy_iso_dir }}/kasm-cidata-{{ hostvars[kasm_fin].kasm_vm.vmid }}.iso"
+    state: absent
+  when: kasm_fin_provisioned | bool

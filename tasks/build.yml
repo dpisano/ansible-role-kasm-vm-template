@@ -1,14 +1,34 @@
 ---
-- name: Check the OS of every template
+- name: Check the OS of every VM
   ansible.builtin.assert:
     that:
       - item.os in kasm_template_os
       - (kasm_template_defaults | combine(item)).kind in ['agent', 'desktop']
     fail_msg: "{{ item.name | default('?') }}: os must be one of {{ kasm_template_os.keys() | list }} and kind agent or desktop"
     quiet: true
-  loop: "{{ kasm_templates }}"
+  loop: "{{ kasm_builds }}"
   loop_control:
     label: "{{ item.name }}"
+
+- name: Check templates are agents and servers do not clash with them
+  ansible.builtin.assert:
+    that:
+      - (kasm_templates | map(attribute='kind', default='agent') | unique | list) in [['agent'], []]
+      - (kasm_builds | map(attribute='vmid') | list | length) == (kasm_builds | map(attribute='vmid') | unique | list | length)
+      - (kasm_builds | map(attribute='name') | list | length) == (kasm_builds | map(attribute='name') | unique | list | length)
+    fail_msg: >-
+      kasm_templates only builds kind: agent templates (Linux desktops are
+      kasm_servers, which are not templates), and every name and vmid must be unique.
+    quiet: true
+
+- name: Check the RDP login of the cloud-image servers
+  ansible.builtin.assert:
+    that: kasm_server_login_password | length > 0
+    fail_msg: >-
+      kasm_servers with a cloud-image OS need kasm_server_login_password, the password
+      the role gives the RDP login (kasm_server_login_user) that Kasm connects as.
+    quiet: true
+  when: kasm_servers | rejectattr('os', 'in', ['omarchy', 'popos']) | list | length > 0
 
 - name: Enable snippets on the snippets storage
   block:
@@ -41,17 +61,17 @@
     url: "{{ item.url }}"
     dest: "{{ kasm_template_image_dir }}/{{ item.file }}"
     mode: "0644"
-  loop: "{{ kasm_templates | map(attribute='os') | unique | map('extract', kasm_template_os) | selectattr('file', 'defined') | list }}"
+  loop: "{{ kasm_builds | map(attribute='os') | unique | map('extract', kasm_template_os) | selectattr('file', 'defined') | list }}"
   loop_control:
     label: "{{ item.file }}"
 
 - name: Prepare for Omarchy
   ansible.builtin.include_tasks: omarchy-host.yml
-  when: kasm_templates | selectattr('os', 'eq', 'omarchy') | list | length > 0
+  when: kasm_builds | selectattr('os', 'eq', 'omarchy') | list | length > 0
 
-- name: Build each template VM
+- name: Build each VM
   ansible.builtin.include_tasks: vm.yml
-  loop: "{{ kasm_templates }}"
+  loop: "{{ kasm_builds }}"
   loop_control:
     loop_var: kasm_item
     label: "{{ kasm_item.name }}"
